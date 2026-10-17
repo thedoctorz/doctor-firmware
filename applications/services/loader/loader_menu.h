@@ -8,7 +8,16 @@ extern "C" {
 
 typedef struct LoaderMenu LoaderMenu;
 
-LoaderMenu* loader_menu_alloc(void (*closed_cb)(void*), void* context, const MenuStyle* style);
+typedef enum {
+    LoaderMenuStartViewPrimary,
+    LoaderMenuStartViewSettings,
+} LoaderMenuStartView;
+
+LoaderMenu* loader_menu_alloc(
+    void (*closed_cb)(void*),
+    void* context,
+    LoaderMenuStartView start_view,
+    const MenuStyle* style);
 
 void loader_menu_free(LoaderMenu* loader_menu);
 

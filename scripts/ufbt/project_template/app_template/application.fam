@@ -1,5 +1,3 @@
-# For details & more options, see documentation/AppManifests.md in firmware repo
-
 App(
     appid="@FBT_APPID@",  # Must be unique
     name="App @FBT_APPID@",  # Displayed in menus

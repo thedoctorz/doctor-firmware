@@ -48,6 +48,7 @@ bool subghz_scene_need_saving_on_event(void* context, SceneManagerEvent event) {
         } else if(event.event == SubGhzCustomEventSceneExit) {
             SubGhzRxKeyState state = subghz_rx_key_state_get(subghz);
             subghz_rx_key_state_set(subghz, SubGhzRxKeyStateIDLE);
+            if(subghz->gps) subghz_gps_reset_rx_session(subghz->gps);
 
             if(state == SubGhzRxKeyStateExit) {
                 if(scene_manager_has_previous_scene(subghz->scene_manager, SubGhzSceneReadRAW)) {

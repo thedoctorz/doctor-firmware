@@ -110,6 +110,13 @@ size_t gui_get_framebuffer_size(const Gui* gui);
  */
 void gui_set_lockdown(Gui* gui, bool lockdown);
 
+/** Hide status bar
+ *
+ * @param      gui     Gui instance
+ * @param      hidden  true to hide, false to show
+ */
+void gui_set_hide_statusbar(Gui* gui, bool hidden);
+
 /** Inhibit lockdown mode
  * 
  * Lockdown mode can be inhibited by calling this function with inhibit set to true.

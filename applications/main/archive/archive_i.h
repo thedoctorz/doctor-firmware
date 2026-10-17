@@ -39,8 +39,11 @@ struct ArchiveApp {
 
     FuriString* fav_move_str;
     FuriString* dst_path;
+    FuriString* search_restore_path;
     char text_store[MAX_NAME_LEN];
     char file_extension[MAX_EXT_LEN + 1];
+    FuriThread* search_thread;
 };
 
 void archive_show_loading_popup(ArchiveApp* context, bool show);
+void archive_search_stop(ArchiveApp* archive);

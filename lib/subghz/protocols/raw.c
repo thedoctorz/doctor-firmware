@@ -7,13 +7,15 @@
 
 #include <flipper_format/flipper_format_i.h>
 #include <lib/toolbox/stream/stream.h>
+#include <lib/toolbox/path.h>
+#include <storage/storage.h>
 
 #define TAG "SubGhzProtocolRaw"
 
 #define SUBGHZ_DOWNLOAD_MAX_SIZE 512
 
 static const SubGhzBlockConst subghz_protocol_raw_const = {
-    .te_short = 50,
+    .te_short = 20,
     .te_long = 32700,
     .te_delta = 0,
     .min_count_bit_for_found = 0,
@@ -81,6 +83,140 @@ const SubGhzProtocol subghz_protocol_raw = {
     .encoder = &subghz_protocol_raw_encoder,
 };
 
+static bool
+    subghz_protocol_raw_write_file_header(FlipperFormat* flipper_file, SubGhzRadioPreset* preset) {
+    furi_assert(flipper_file);
+    furi_assert(preset);
+
+    FuriString* temp_str = furi_string_alloc();
+    bool result = false;
+
+    do {
+        if(!flipper_format_write_header_cstr(
+               flipper_file, SUBGHZ_RAW_FILE_TYPE, SUBGHZ_RAW_FILE_VERSION)) {
+            FURI_LOG_E(TAG, "Unable to add header");
+            break;
+        }
+
+        if(!flipper_format_write_uint32(flipper_file, "Frequency", &preset->frequency, 1)) {
+            FURI_LOG_E(TAG, "Unable to add Frequency");
+            break;
+        }
+
+        subghz_block_generic_get_preset_name(furi_string_get_cstr(preset->name), temp_str);
+        if(!flipper_format_write_string_cstr(
+               flipper_file, "Preset", furi_string_get_cstr(temp_str))) {
+            FURI_LOG_E(TAG, "Unable to add Preset");
+            break;
+        }
+        if(!strcmp(furi_string_get_cstr(temp_str), "FuriHalSubGhzPresetCustom")) {
+            if(!flipper_format_write_string_cstr(flipper_file, "Custom_preset_module", "CC1101")) {
+                FURI_LOG_E(TAG, "Unable to add Custom_preset_module");
+                break;
+            }
+            if(!flipper_format_write_hex(
+                   flipper_file, "Custom_preset_data", preset->data, preset->data_size)) {
+                FURI_LOG_E(TAG, "Unable to add Custom_preset_data");
+                break;
+            }
+        }
+        if(!flipper_format_write_string_cstr(flipper_file, "Protocol", SUBGHZ_PROTOCOL_RAW_NAME)) {
+            FURI_LOG_E(TAG, "Unable to add Protocol");
+            break;
+        }
+
+        result = true;
+    } while(false);
+
+    furi_string_free(temp_str);
+    return result;
+}
+
+static int32_t subghz_protocol_raw_level_duration_to_raw(const LevelDuration* level_duration) {
+    if(level_duration_get_level(*level_duration)) {
+        return (int32_t)level_duration_get_duration(*level_duration);
+    }
+    return -(int32_t)level_duration_get_duration(*level_duration);
+}
+
+bool subghz_protocol_raw_save_upload_to_file(
+    const LevelDuration* upload,
+    size_t upload_size,
+    SubGhzRadioPreset* preset,
+    const char* file_path) {
+    furi_check(upload);
+    furi_check(preset);
+    furi_check(file_path);
+
+    if(upload_size == 0) {
+        return false;
+    }
+
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    FlipperFormat* flipper_file = flipper_format_file_alloc(storage);
+    int32_t* raw_data = malloc(SUBGHZ_DOWNLOAD_MAX_SIZE * sizeof(int32_t));
+    bool saved = false;
+
+    do {
+        FuriString* dir_name = furi_string_alloc();
+        path_extract_dirname(file_path, dir_name);
+        if(!storage_simply_mkdir(storage, furi_string_get_cstr(dir_name))) {
+            furi_string_free(dir_name);
+            break;
+        }
+        furi_string_free(dir_name);
+
+        if(!storage_simply_remove(storage, file_path)) {
+            break;
+        }
+
+        if(!flipper_format_file_open_always(flipper_file, file_path)) {
+            FURI_LOG_E(TAG, "Unable to open file for write: %s", file_path);
+            break;
+        }
+
+        if(!subghz_protocol_raw_write_file_header(flipper_file, preset)) {
+            break;
+        }
+
+        size_t index = 0;
+        while(index < upload_size) {
+            size_t chunk_size = upload_size - index;
+            if(chunk_size > SUBGHZ_DOWNLOAD_MAX_SIZE) {
+                chunk_size = SUBGHZ_DOWNLOAD_MAX_SIZE;
+            }
+
+            for(size_t i = 0; i < chunk_size; i++) {
+                raw_data[i] = subghz_protocol_raw_level_duration_to_raw(&upload[index + i]);
+            }
+
+            if(!flipper_format_write_int32(flipper_file, "RAW_Data", raw_data, chunk_size)) {
+                FURI_LOG_E(TAG, "Unable to add RAW_Data");
+                break;
+            }
+
+            index += chunk_size;
+        }
+
+        if(index < upload_size) {
+            break;
+        }
+
+        flipper_format_file_close(flipper_file);
+        saved = (storage_common_stat(storage, file_path, NULL) == FSE_OK);
+    } while(false);
+
+    if(!saved && flipper_file) {
+        flipper_format_file_close(flipper_file);
+    }
+
+    free(raw_data);
+    flipper_format_free(flipper_file);
+    furi_record_close(RECORD_STORAGE);
+
+    return saved;
+}
+
 bool subghz_protocol_raw_save_to_file_init(
     SubGhzProtocolDecoderRAW* instance,
     const char* dev_name,
@@ -116,39 +252,7 @@ bool subghz_protocol_raw_save_to_file_init(
             break;
         }
 
-        if(!flipper_format_write_header_cstr(
-               instance->flipper_file, SUBGHZ_RAW_FILE_TYPE, SUBGHZ_RAW_FILE_VERSION)) {
-            FURI_LOG_E(TAG, "Unable to add header");
-            break;
-        }
-
-        if(!flipper_format_write_uint32(
-               instance->flipper_file, "Frequency", &preset->frequency, 1)) {
-            FURI_LOG_E(TAG, "Unable to add Frequency");
-            break;
-        }
-
-        subghz_block_generic_get_preset_name(furi_string_get_cstr(preset->name), temp_str);
-        if(!flipper_format_write_string_cstr(
-               instance->flipper_file, "Preset", furi_string_get_cstr(temp_str))) {
-            FURI_LOG_E(TAG, "Unable to add Preset");
-            break;
-        }
-        if(!strcmp(furi_string_get_cstr(temp_str), "FuriHalSubGhzPresetCustom")) {
-            if(!flipper_format_write_string_cstr(
-                   instance->flipper_file, "Custom_preset_module", "CC1101")) {
-                FURI_LOG_E(TAG, "Unable to add Custom_preset_module");
-                break;
-            }
-            if(!flipper_format_write_hex(
-                   instance->flipper_file, "Custom_preset_data", preset->data, preset->data_size)) {
-                FURI_LOG_E(TAG, "Unable to add Custom_preset_data");
-                break;
-            }
-        }
-        if(!flipper_format_write_string_cstr(
-               instance->flipper_file, "Protocol", instance->base.protocol->name)) {
-            FURI_LOG_E(TAG, "Unable to add Protocol");
+        if(!subghz_protocol_raw_write_file_header(instance->flipper_file, preset)) {
             break;
         }
 

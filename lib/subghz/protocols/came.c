@@ -35,6 +35,7 @@ struct SubGhzProtocolDecoderCame {
 
     SubGhzBlockDecoder decoder;
     SubGhzBlockGeneric generic;
+    uint32_t header_te;
 };
 SUBGHZ_ASSERT_DECODER_COMMON_LAYOUT(SubGhzProtocolDecoderCame);
 
@@ -95,7 +96,7 @@ void* subghz_protocol_encoder_came_alloc(SubGhzEnvironment* environment) {
 /**
  * Generating an upload from data.
  * @param instance Pointer to a SubGhzProtocolEncoderCame instance
- * @return true Always; this encoder has no failure path
+ * @return true On success
  */
 static bool subghz_protocol_encoder_came_get_upload(SubGhzProtocolEncoderCame* instance) {
     furi_assert(instance);
@@ -189,6 +190,29 @@ void* subghz_protocol_decoder_came_alloc(SubGhzEnvironment* environment) {
         sizeof(SubGhzProtocolDecoderCame), &subghz_protocol_came);
 }
 
+static bool subghz_protocol_came_payload_ok(uint64_t data, uint8_t bits, uint32_t header_te) {
+    if(subghz_protocol_blocks_key_is_degenerate(data, bits)) {
+        return false;
+    }
+
+    if(bits != CAME_12_COUNT_BIT) {
+        return true;
+    }
+
+    if(header_te < (uint32_t)subghz_protocol_came_const.te_short * 41U) {
+        return false;
+    }
+
+    uint8_t open_nibbles = 0;
+    for(uint8_t i = 0; i < 3; i++) {
+        uint8_t nibble = (uint8_t)((data >> (4U * i)) & 0x0FU);
+        if((nibble == 0x0AU) || (nibble == 0x05U)) {
+            open_nibbles++;
+        }
+    }
+    return open_nibbles < 2;
+}
+
 void subghz_protocol_decoder_came_feed(void* context, bool level, uint32_t duration) {
     furi_assert(context);
     SubGhzProtocolDecoderCame* instance = context;
@@ -200,6 +224,7 @@ void subghz_protocol_decoder_came_feed(void* context, bool level, uint32_t durat
             // delta = 150 us x 63 = 9450 us + 17920 us = 27370 us max possible value
             //Found header CAME
             // 26700 us or 24000 us max possible values
+            instance->header_te = duration;
             instance->decoder.parser_step = CameDecoderStepFoundStartBit;
         }
         break;
@@ -227,14 +252,19 @@ void subghz_protocol_decoder_came_feed(void* context, bool level, uint32_t durat
                    (instance->decoder.decode_count_bit == PRASTEL_25_COUNT_BIT) ||
                    /* 42 bit Prastel is a rolling code and lives in prastel.c */
                    (instance->decoder.decode_count_bit == CAME_24_COUNT_BIT)) {
-                    instance->generic.serial = 0x0;
-                    instance->generic.btn = 0x0;
+                    if(subghz_protocol_came_payload_ok(
+                           instance->decoder.decode_data,
+                           instance->decoder.decode_count_bit,
+                           instance->header_te)) {
+                        instance->generic.serial = 0x0;
+                        instance->generic.btn = 0x0;
 
-                    instance->generic.data = instance->decoder.decode_data;
-                    instance->generic.data_count_bit = instance->decoder.decode_count_bit;
+                        instance->generic.data = instance->decoder.decode_data;
+                        instance->generic.data_count_bit = instance->decoder.decode_count_bit;
 
-                    if(instance->base.callback)
-                        instance->base.callback(&instance->base, instance->base.context);
+                        if(instance->base.callback)
+                            instance->base.callback(&instance->base, instance->base.context);
+                    }
                 }
                 break;
             }

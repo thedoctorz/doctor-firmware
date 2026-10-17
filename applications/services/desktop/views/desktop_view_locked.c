@@ -231,10 +231,9 @@ void desktop_view_locked_lock(DesktopViewLocked* locked_view, bool pin_locked) {
 void desktop_view_locked_unlock(DesktopViewLocked* locked_view) {
     locked_view->lock_count = 0;
     DesktopViewLockedModel* model = view_get_model(locked_view->view);
-    model->view_state = DesktopViewLockedStateUnlockedHintShown;
+    model->view_state = DesktopViewLockedStateUnlocked;
     model->pin_locked = false;
     view_commit_model(locked_view->view, true);
-    furi_timer_start(locked_view->timer, UNLOCKED_HINT_TIMEOUT_MS);
 }
 
 bool desktop_view_locked_is_locked_hint_visible(DesktopViewLocked* locked_view) {

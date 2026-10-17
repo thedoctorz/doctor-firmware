@@ -1,17 +1,13 @@
 #include "menu.h"
 
-#include <gui/elements.h>
 #include <assets_icons.h>
 #include <furi.h>
+#include <stddef.h>
 
 #define TAG "Menu"
 
-// Rate at which MenuModel::scroll_counter advances, i.e. how fast styles scroll a long label
 #define MENU_SCROLL_INTERVAL_MS (333)
 
-// Plugin ABI - see MENU_STYLE_PLUGIN_API_VERSION in menu.h. Every field here is pointer-width, so
-// sizeof alone cannot see a reorder; these pin the offsets a style actually reads. Fix the assert
-// AND bump the version, or already-built styles read the wrong fields.
 static_assert(
     offsetof(MenuItem, label) == 0 && offsetof(MenuItem, icon) == 4 && sizeof(MenuItem) == 20,
     "MenuItem layout and stride are plugin ABI");
@@ -27,7 +23,54 @@ static_assert(
 struct Menu {
     View* view;
     FuriTimer* scroll_timer;
+    bool entered;
 };
+
+static const uint8_t menu_dsi_slot_cx[5] = {8, 34, 64, 94, 120};
+#define MENU_DSI_ICON_CY      29
+#define MENU_DSI_CENTER_SCALE 2
+#define MENU_DSI_LABEL_Y      46
+#define MENU_DSI_BAR_Y        61
+#define MENU_DSI_BAR_X        14
+#define MENU_DSI_BAR_W        100
+
+static void menu_draw_dsi(Canvas* canvas, MenuModel* model) {
+    size_t position = model->position;
+    size_t items_count = model->count;
+    MenuItem* item;
+
+    for(int8_t slot = 0; slot < 5; slot++) {
+        if(slot == 2) continue;
+        int32_t offset = slot - 2;
+        size_t index = (position + items_count + offset) % items_count;
+        item = &model->items[index];
+        canvas_draw_icon_animation(
+            canvas, menu_dsi_slot_cx[slot] - 7, MENU_DSI_ICON_CY - 7, item->icon);
+    }
+    item = &model->items[position];
+    canvas_draw_icon_animation_scaled(
+        canvas,
+        menu_dsi_slot_cx[2] - 7 * MENU_DSI_CENTER_SCALE,
+        MENU_DSI_ICON_CY - 7 * MENU_DSI_CENTER_SCALE,
+        item->icon,
+        MENU_DSI_CENTER_SCALE);
+
+    canvas_set_font(canvas, FontPrimary);
+    canvas_draw_str_aligned(canvas, 64, MENU_DSI_LABEL_Y, AlignCenter, AlignTop, item->label);
+
+    if(items_count > 1) {
+        canvas_draw_line(
+            canvas,
+            MENU_DSI_BAR_X,
+            MENU_DSI_BAR_Y,
+            MENU_DSI_BAR_X + MENU_DSI_BAR_W,
+            MENU_DSI_BAR_Y);
+        size_t seg_w = MENU_DSI_BAR_W / items_count;
+        if(seg_w < 8) seg_w = 8;
+        size_t seg_x = MENU_DSI_BAR_X + (MENU_DSI_BAR_W - seg_w) * position / (items_count - 1);
+        canvas_draw_box(canvas, seg_x, MENU_DSI_BAR_Y - 1, seg_w, 3);
+    }
+}
 
 static void menu_draw_callback(Canvas* canvas, void* _model) {
     MenuModel* model = _model;
@@ -35,26 +78,17 @@ static void menu_draw_callback(Canvas* canvas, void* _model) {
     canvas_clear(canvas);
 
     if(model->position >= model->count) {
-        canvas_draw_str(canvas, 2, 32, "Empty");
-        elements_scrollbar(canvas, 0, 0);
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str_aligned(canvas, 64, 32, AlignCenter, AlignCenter, "Empty");
     } else if(model->style) {
         model->style->draw(canvas, model);
     } else {
-        for(size_t i = 0; i < 3; i++) {
-            const MenuItem* item =
-                &model->items[(model->position + model->count + i - 1) % model->count];
-            canvas_set_font(canvas, i == 1 ? FontPrimary : FontSecondary);
-            canvas_draw_icon_animation(canvas, 4, 3 + 22 * i, item->icon);
-            canvas_draw_str(canvas, 22, 14 + 22 * i, item->label);
-        }
-        elements_frame(canvas, 0, 21, 128 - 5, 21);
-        elements_scrollbar(canvas, model->position, model->count);
+        menu_draw_dsi(canvas, model);
     }
 }
 
 static void menu_set_position(MenuModel* model, size_t position) {
     if(position >= model->count || position == model->position) return;
-    // A style gets a mutable model, so the old position may have been written since it was checked
     if(model->position < model->count) {
         icon_animation_stop(model->items[model->position].icon);
     }
@@ -80,21 +114,24 @@ static bool menu_process_move(Menu* menu, InputKey key) {
                     dropped = requested >= count;
                     menu_set_position(model, requested);
                 }
-            } else if(key == InputKeyUp || key == InputKeyDown) {
-                consumed = true;
-                if(model->position < model->count) {
-                    size_t position = model->position;
-                    if(key == InputKeyUp) {
-                        position = position ? position - 1 : model->count - 1;
-                    } else {
-                        position = (position + 1) % model->count;
+            } else {
+                const bool prev_key = key == InputKeyLeft;
+                const bool next_key = key == InputKeyRight;
+                if(prev_key || next_key) {
+                    consumed = true;
+                    if(model->position < model->count) {
+                        size_t position = model->position;
+                        if(prev_key) {
+                            position = position ? position - 1 : model->count - 1;
+                        } else {
+                            position = (position + 1) % model->count;
+                        }
+                        menu_set_position(model, position);
                     }
-                    menu_set_position(model, position);
                 }
             }
         },
         consumed);
-    // Dropping this silently is what kept the C64 and Compact dead keys invisible
     if(dropped) {
         FURI_LOG_W(TAG, "Style asked for item %zu of %zu on key %d", requested, count, key);
     }
@@ -152,6 +189,7 @@ static void menu_scroll_timer_callback(void* context) {
 
 static void menu_enter(void* context) {
     Menu* menu = context;
+    menu->entered = true;
     with_view_model(
         menu->view,
         MenuModel * model,
@@ -167,6 +205,7 @@ static void menu_enter(void* context) {
 
 static void menu_exit(void* context) {
     Menu* menu = context;
+    menu->entered = false;
     with_view_model(
         menu->view,
         MenuModel * model,
@@ -181,6 +220,7 @@ static void menu_exit(void* context) {
 
 Menu* menu_alloc(void) {
     Menu* menu = malloc(sizeof(Menu));
+    menu->entered = false;
     menu->view = view_alloc();
     view_set_context(menu->view, menu);
     view_allocate_model(menu->view, ViewModelTypeLocking, sizeof(MenuModel));
@@ -198,8 +238,6 @@ Menu* menu_alloc(void) {
 void menu_free(Menu* menu) {
     furi_check(menu);
 
-    // Defence in depth: with the timer already gone, menu_reset() below cannot meet a scroll
-    // callback parked on the model mutex, whatever it does with the lock
     furi_timer_free(menu->scroll_timer);
     menu_reset(menu);
     view_free(menu->view);
@@ -234,6 +272,9 @@ void menu_add_item(
             item->index = index;
             item->callback = callback;
             item->callback_context = context;
+            if(menu->entered && model->count == 1) {
+                icon_animation_start(item->icon);
+            }
         },
         true);
 }
@@ -257,8 +298,6 @@ void menu_reset(Menu* menu) {
         },
         true);
 
-    // Only after the model has let go of them: icon_animation_free() blocks on the timer daemon,
-    // which is where menu_scroll_timer_callback() waits for the model mutex
     for(size_t i = 0; i < count; i++) {
         icon_animation_free(items[i].icon);
     }

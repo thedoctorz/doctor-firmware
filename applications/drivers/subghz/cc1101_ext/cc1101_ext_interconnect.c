@@ -90,7 +90,17 @@ const SubGhzDeviceInterconnect subghz_device_cc1101_ext_interconnect = {
     .stop_async_rx = subghz_device_cc1101_ext_stop_async_rx,
 
     .get_rssi = subghz_device_cc1101_ext_get_rssi,
+    .rssi_burst = subghz_device_cc1101_ext_rssi_burst,
     .get_lqi = subghz_device_cc1101_ext_get_lqi,
+    .get_freq_est = subghz_device_cc1101_ext_get_freq_est,
+
+    .hop_begin = subghz_device_cc1101_ext_hop_begin,
+    .hop_prepare = subghz_device_cc1101_ext_hop_prepare,
+    .hop_goto = subghz_device_cc1101_ext_hop_goto,
+    .hop_resume = subghz_device_cc1101_ext_hop_resume,
+    .hop_end = subghz_device_cc1101_ext_hop_end,
+    .hop_read_image = subghz_device_cc1101_ext_hop_read_image,
+    .hop_get_shadow = subghz_device_cc1101_ext_hop_get_shadow,
 
     .rx_pipe_not_empty = subghz_device_cc1101_ext_rx_pipe_not_empty,
     .is_rx_data_crc_valid = subghz_device_cc1101_ext_is_rx_data_crc_valid,

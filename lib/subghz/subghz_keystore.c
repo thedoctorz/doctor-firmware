@@ -112,6 +112,41 @@ static void subghz_keystore_mess_with_iv(uint8_t* iv) {
                  : "r0", "r1", "r2", "r3", "memory");
 }
 
+static bool subghz_keystore_process_buffered_line(
+    SubGhzKeystore* instance,
+    char* encrypted_line,
+    char* decrypted_line,
+    bool encrypted) {
+    if(encrypted) {
+        // Data alignment check, 32 instead of 16 because of hex encoding
+        size_t len = strlen(encrypted_line);
+        if(len % 32 == 0) {
+            // Inplace hex to bin conversion
+            for(size_t i = 0; i < len; i += 2) {
+                uint8_t hi_nibble = 0;
+                uint8_t lo_nibble = 0;
+                hex_char_to_hex_nibble(encrypted_line[i], &hi_nibble);
+                hex_char_to_hex_nibble(encrypted_line[i + 1], &lo_nibble);
+                encrypted_line[i / 2] = (hi_nibble << 4) | lo_nibble;
+            }
+            len /= 2;
+
+            if(furi_hal_crypto_decrypt((uint8_t*)encrypted_line, (uint8_t*)decrypted_line, len)) {
+                subghz_keystore_process_line(instance, decrypted_line);
+            } else {
+                FURI_LOG_E(TAG, "Decryption failed");
+                return false;
+            }
+        } else {
+            FURI_LOG_E(TAG, "Invalid encrypted data: %s", encrypted_line);
+        }
+    } else {
+        subghz_keystore_process_line(instance, encrypted_line);
+    }
+
+    return true;
+}
+
 static bool subghz_keystore_read_file(SubGhzKeystore* instance, Stream* stream, uint8_t* iv) {
     bool result = true;
     uint8_t buffer[FILE_BUFFER_SIZE];
@@ -119,6 +154,8 @@ static bool subghz_keystore_read_file(SubGhzKeystore* instance, Stream* stream, 
     char* decrypted_line = malloc(SUBGHZ_KEYSTORE_FILE_DECRYPTED_LINE_SIZE);
     char* encrypted_line = malloc(SUBGHZ_KEYSTORE_FILE_ENCRYPTED_LINE_SIZE);
     size_t encrypted_line_cursor = 0;
+    memset(decrypted_line, 0, SUBGHZ_KEYSTORE_FILE_DECRYPTED_LINE_SIZE);
+    memset(encrypted_line, 0, SUBGHZ_KEYSTORE_FILE_ENCRYPTED_LINE_SIZE);
 
     do {
         if(iv) {
@@ -133,39 +170,13 @@ static bool subghz_keystore_read_file(SubGhzKeystore* instance, Stream* stream, 
             ret = stream_read(stream, buffer, FILE_BUFFER_SIZE);
             for(uint16_t i = 0; i < ret; i++) {
                 if(buffer[i] == '\n' && encrypted_line_cursor > 0) {
-                    // Process line
-                    if(iv) {
-                        // Data alignment check, 32 instead of 16 because of hex encoding
-                        size_t len = strlen(encrypted_line);
-                        if(len % 32 == 0) {
-                            // Inplace hex to bin conversion
-                            for(size_t i = 0; i < len; i += 2) {
-                                uint8_t hi_nibble = 0;
-                                uint8_t lo_nibble = 0;
-                                hex_char_to_hex_nibble(encrypted_line[i], &hi_nibble);
-                                hex_char_to_hex_nibble(encrypted_line[i + 1], &lo_nibble);
-                                encrypted_line[i / 2] = (hi_nibble << 4) | lo_nibble;
-                            }
-                            len /= 2;
-
-                            if(furi_hal_crypto_decrypt(
-                                   (uint8_t*)encrypted_line, (uint8_t*)decrypted_line, len)) {
-                                subghz_keystore_process_line(instance, decrypted_line);
-                            } else {
-                                FURI_LOG_E(TAG, "Decryption failed");
-                                result = false;
-                                break;
-                            }
-                        } else {
-                            FURI_LOG_E(TAG, "Invalid encrypted data: %s", encrypted_line);
-                        }
-                    } else {
-                        subghz_keystore_process_line(instance, encrypted_line);
-                    }
+                    result = subghz_keystore_process_buffered_line(
+                        instance, encrypted_line, decrypted_line, iv != NULL);
                     // reset line buffer
                     memset(decrypted_line, 0, SUBGHZ_KEYSTORE_FILE_DECRYPTED_LINE_SIZE);
                     memset(encrypted_line, 0, SUBGHZ_KEYSTORE_FILE_ENCRYPTED_LINE_SIZE);
                     encrypted_line_cursor = 0;
+                    if(!result) break;
                 } else if(buffer[i] == '\r' || buffer[i] == '\n') {
                     // do not add line endings to the buffer
                 } else {
@@ -180,6 +191,11 @@ static bool subghz_keystore_read_file(SubGhzKeystore* instance, Stream* stream, 
                 }
             }
         } while(ret > 0 && result);
+
+        if(result && encrypted_line_cursor > 0) {
+            result = subghz_keystore_process_buffered_line(
+                instance, encrypted_line, decrypted_line, iv != NULL);
+        }
 
         if(iv) furi_hal_crypto_enclave_unload_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT);
     } while(false);
@@ -245,6 +261,8 @@ bool subghz_keystore_load(SubGhzKeystore* instance, const char* file_name) {
     furi_record_close(RECORD_STORAGE);
 
     furi_string_free(filetype);
+
+    SubGhzKeyArray_reserve(instance->data, 0);
 
     return result;
 }

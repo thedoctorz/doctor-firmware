@@ -13,7 +13,6 @@ struct DesktopMainView {
     DesktopMainViewCallback callback;
     void* context;
     FuriTimer* poweroff_timer;
-    bool dummy_mode;
 };
 
 #define DESKTOP_MAIN_VIEW_POWEROFF_TIMEOUT 1300
@@ -38,73 +37,36 @@ View* desktop_main_get_view(DesktopMainView* main_view) {
     return main_view->view;
 }
 
-void desktop_main_set_dummy_mode_state(DesktopMainView* main_view, bool dummy_mode) {
-    furi_assert(main_view);
-    main_view->dummy_mode = dummy_mode;
-}
-
 bool desktop_main_input_callback(InputEvent* event, void* context) {
     furi_assert(event);
     furi_assert(context);
 
     DesktopMainView* main_view = context;
 
-    if(main_view->dummy_mode == false) {
-        if(event->type == InputTypeShort) {
-            if(event->key == InputKeyOk) {
-                main_view->callback(DesktopMainEventOpenMenu, main_view->context);
-            } else if(event->key == InputKeyUp) {
-                main_view->callback(DesktopMainEventOpenLockMenu, main_view->context);
-            } else if(event->key == InputKeyDown) {
-                main_view->callback(DesktopMainEventOpenArchive, main_view->context);
-            } else if(event->key == InputKeyLeft) {
-                main_view->callback(DesktopMainEventOpenFavoriteLeftShort, main_view->context);
-            }
-            // Right key short is handled by animation manager
-        } else if(event->type == InputTypeLong) {
-            if(event->key == InputKeyUp) {
-                main_view->callback(DesktopMainEventLock, main_view->context);
-            } else if(event->key == InputKeyDown) {
-                main_view->callback(DesktopMainEventOpenDebug, main_view->context);
-            } else if(event->key == InputKeyLeft) {
-                main_view->callback(DesktopMainEventOpenFavoriteLeftLong, main_view->context);
-            } else if(event->key == InputKeyRight) {
-                main_view->callback(DesktopMainEventOpenFavoriteRightLong, main_view->context);
-            } else if(event->key == InputKeyOk) {
-                if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug)) {
-                    main_view->callback(DesktopAnimationEventNewIdleAnimation, main_view->context);
-                } else {
-                    main_view->callback(DesktopMainEventOpenFavoriteOkLong, main_view->context);
-                }
-            }
+    if(event->type == InputTypeShort) {
+        if(event->key == InputKeyOk) {
+            main_view->callback(DesktopMainEventOpenMenu, main_view->context);
+        } else if(event->key == InputKeyUp) {
+            main_view->callback(DesktopMainEventOpenLockMenu, main_view->context);
+        } else if(event->key == InputKeyDown) {
+            main_view->callback(DesktopMainEventOpenArchive, main_view->context);
+        } else if(event->key == InputKeyLeft) {
+            main_view->callback(DesktopMainEventOpenFavoriteLeftShort, main_view->context);
         }
-    } else {
-        if(event->type == InputTypeShort) {
-            if(event->key == InputKeyOk) {
-                main_view->callback(DesktopDummyEventOpenOk, main_view->context);
-            } else if(event->key == InputKeyUp) {
-                main_view->callback(DesktopMainEventOpenLockMenu, main_view->context);
-            } else if(event->key == InputKeyDown) {
-                main_view->callback(DesktopDummyEventOpenDown, main_view->context);
-            } else if(event->key == InputKeyLeft) {
-                main_view->callback(DesktopDummyEventOpenLeft, main_view->context);
-            }
-            // Right key short is handled by animation manager
-        } else if(event->type == InputTypeLong) {
-            if(event->key == InputKeyOk) {
-                // Not working in DummyMode
-                // if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug)) {
-                //     main_view->callback(DesktopAnimationEventNewIdleAnimation, main_view->context);
-                // }
-                main_view->callback(DesktopDummyEventOpenOkLong, main_view->context);
-            } else if(event->key == InputKeyUp) {
-                main_view->callback(DesktopDummyEventOpenUpLong, main_view->context);
-            } else if(event->key == InputKeyDown) {
-                main_view->callback(DesktopDummyEventOpenDownLong, main_view->context);
-            } else if(event->key == InputKeyLeft) {
-                main_view->callback(DesktopDummyEventOpenLeftLong, main_view->context);
-            } else if(event->key == InputKeyRight) {
-                main_view->callback(DesktopDummyEventOpenRightLong, main_view->context);
+    } else if(event->type == InputTypeLong) {
+        if(event->key == InputKeyUp) {
+            main_view->callback(DesktopMainEventLock, main_view->context);
+        } else if(event->key == InputKeyDown) {
+            main_view->callback(DesktopMainEventOpenDebug, main_view->context);
+        } else if(event->key == InputKeyLeft) {
+            main_view->callback(DesktopMainEventOpenFavoriteLeftLong, main_view->context);
+        } else if(event->key == InputKeyRight) {
+            main_view->callback(DesktopMainEventOpenFavoriteRightLong, main_view->context);
+        } else if(event->key == InputKeyOk) {
+            if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug)) {
+                main_view->callback(DesktopAnimationEventNewIdleAnimation, main_view->context);
+            } else {
+                main_view->callback(DesktopMainEventOpenFavoriteOkLong, main_view->context);
             }
         }
     }

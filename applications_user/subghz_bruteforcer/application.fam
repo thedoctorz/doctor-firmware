@@ -1,0 +1,14 @@
+App(
+    appid="subghz_bruteforcer",
+    name="Sub-GHz Bruteforcer",
+    apptype=FlipperAppType.MENUEXTERNAL,
+    entry_point="subbrute_app",
+    requires=["gui", "dialogs"],
+    stack_size=4 * 1024,
+    order=11,
+    icon="A_Subbrute_14",
+    fap_icon="images/subbrute_10px.png",
+    fap_exclude_libs=["gcc"],
+    fap_category="Sub-GHz",
+    fap_icon_assets="images",
+)

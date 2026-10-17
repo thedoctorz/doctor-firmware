@@ -111,7 +111,7 @@ void* subghz_protocol_encoder_jarolift_alloc(SubGhzEnvironment* environment) {
 static bool
     subghz_protocol_jarolift_gen_data(SubGhzProtocolEncoderJarolift* instance, uint8_t btn) {
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(btn);
     }
 
@@ -229,7 +229,7 @@ bool subghz_protocol_jarolift_create_data(
 /**
  * Generating an upload from data.
  * @param instance Pointer to a SubGhzProtocolEncoderJarolift instance
- * @return true Always; this encoder has no failure path
+ * @return true On success
  */
 static bool subghz_protocol_encoder_jarolift_get_upload(
     SubGhzProtocolEncoderJarolift* instance,
@@ -540,7 +540,7 @@ static void subghz_protocol_jarolift_remote_controller(
         instance->seed = ((decrypt >> 24) << 8) | (group >> 8);
         instance->cnt = decrypt & 0xFFFF;
         // Save original button for later use
-        if(subghz_custom_btn_get_original() == 0) {
+        if(!subghz_custom_btn_has_original()) {
             subghz_custom_btn_set_original(instance->btn);
         }
         subghz_custom_btn_set_max(3);

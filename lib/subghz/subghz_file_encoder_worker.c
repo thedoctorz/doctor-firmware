@@ -10,7 +10,6 @@
 
 #define SUBGHZ_FILE_ENCODER_LOAD 512
 
-/* Longest duration the radio can hold a level for in a single step */
 #define SUBGHZ_FILE_ENCODER_DURATION_MAX 1000000
 
 struct SubGhzFileEncoderWorker {
@@ -65,9 +64,6 @@ bool subghz_file_encoder_worker_data_parse(SubGhzFileEncoderWorker* instance, co
         while(strint_to_int32(str, &str, &duration, 10) == StrintParseNoError) {
             if((duration < -SUBGHZ_FILE_ENCODER_DURATION_MAX) ||
                (duration > SUBGHZ_FILE_ENCODER_DURATION_MAX)) {
-                //the radio cannot hold a level for that long, so on TX the sample is
-                //replaced by a short pulse - when decoding, clamping keeps the long
-                //silence between two signals a long silence
                 int32_t clamped = instance->is_decoding ? SUBGHZ_FILE_ENCODER_DURATION_MAX : 100;
                 subghz_file_encoder_worker_add_level_duration(
                     instance, (duration > 0) ? clamped : -clamped);
@@ -175,8 +171,6 @@ static int32_t subghz_file_encoder_worker_thread(void* context) {
     }
 
     FURI_LOG_I(TAG, "End read file");
-    //nothing was put on the air when decoding, and is_async_complete_tx() never turns
-    //true outside of a transmission, so this would spin until the worker is stopped
     while(!instance->is_decoding && instance->device &&
           !subghz_devices_is_async_complete_tx(instance->device) && instance->worker_running) {
         furi_delay_ms(5);
@@ -237,7 +231,6 @@ bool subghz_file_encoder_worker_start(
 
     furi_stream_buffer_reset(instance->stream);
     furi_string_set(instance->file_path, file_path);
-    //without a radio the samples go to a decoder, not on the air
     instance->device = radio_device_name ? subghz_devices_get_by_name(radio_device_name) : NULL;
     instance->is_decoding = (instance->device == NULL);
     instance->worker_running = true;

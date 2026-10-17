@@ -195,10 +195,11 @@ inline static void furi_hal_spi_bus_r_handle_event_callback(
 inline static void furi_hal_spi_bus_external_handle_event_callback(
     const FuriHalSpiBusHandle* handle,
     FuriHalSpiBusHandleEvent event,
-    const LL_SPI_InitTypeDef* preset) {
+    const LL_SPI_InitTypeDef* preset,
+    GpioSpeed speed) {
     if(event == FuriHalSpiBusHandleEventInit) {
         furi_hal_gpio_write(handle->cs, true);
-        furi_hal_gpio_init(handle->cs, GpioModeOutputPushPull, GpioPullUp, GpioSpeedVeryHigh);
+        furi_hal_gpio_init(handle->cs, GpioModeOutputPushPull, GpioPullUp, speed);
     } else if(event == FuriHalSpiBusHandleEventDeinit) {
         furi_hal_gpio_write(handle->cs, true);
         furi_hal_gpio_init(handle->cs, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
@@ -208,23 +209,11 @@ inline static void furi_hal_spi_bus_external_handle_event_callback(
         LL_SPI_Enable(handle->bus->spi);
 
         furi_hal_gpio_init_ex(
-            handle->miso,
-            GpioModeAltFunctionPushPull,
-            GpioPullDown,
-            GpioSpeedVeryHigh,
-            GpioAltFn5SPI1);
+            handle->miso, GpioModeAltFunctionPushPull, GpioPullDown, speed, GpioAltFn5SPI1);
         furi_hal_gpio_init_ex(
-            handle->mosi,
-            GpioModeAltFunctionPushPull,
-            GpioPullDown,
-            GpioSpeedVeryHigh,
-            GpioAltFn5SPI1);
+            handle->mosi, GpioModeAltFunctionPushPull, GpioPullDown, speed, GpioAltFn5SPI1);
         furi_hal_gpio_init_ex(
-            handle->sck,
-            GpioModeAltFunctionPushPull,
-            GpioPullDown,
-            GpioSpeedVeryHigh,
-            GpioAltFn5SPI1);
+            handle->sck, GpioModeAltFunctionPushPull, GpioPullDown, speed, GpioAltFn5SPI1);
 
         furi_hal_gpio_write(handle->cs, false);
     } else if(event == FuriHalSpiBusHandleEventDeactivate) {
@@ -338,12 +327,28 @@ static void furi_hal_spi_bus_handle_external_event_callback(
     const FuriHalSpiBusHandle* handle,
     FuriHalSpiBusHandleEvent event) {
     furi_hal_spi_bus_external_handle_event_callback(
-        handle, event, &furi_hal_spi_preset_1edge_low_2m);
+        handle, event, &furi_hal_spi_preset_1edge_low_2m, GpioSpeedVeryHigh);
 }
 
 const FuriHalSpiBusHandle furi_hal_spi_bus_handle_external = {
     .bus = &furi_hal_spi_bus_r,
     .callback = furi_hal_spi_bus_handle_external_event_callback,
+    .miso = &gpio_ext_pa6,
+    .mosi = &gpio_ext_pa7,
+    .sck = &gpio_ext_pb3,
+    .cs = &gpio_ext_pa4,
+};
+
+static void furi_hal_spi_bus_handle_external_radio_event_callback(
+    const FuriHalSpiBusHandle* handle,
+    FuriHalSpiBusHandleEvent event) {
+    furi_hal_spi_bus_external_handle_event_callback(
+        handle, event, &furi_hal_spi_preset_1edge_low_8m, GpioSpeedMedium);
+}
+
+const FuriHalSpiBusHandle furi_hal_spi_bus_handle_external_radio = {
+    .bus = &furi_hal_spi_bus_r,
+    .callback = furi_hal_spi_bus_handle_external_radio_event_callback,
     .miso = &gpio_ext_pa6,
     .mosi = &gpio_ext_pa7,
     .sck = &gpio_ext_pb3,

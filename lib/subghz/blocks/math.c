@@ -242,3 +242,46 @@ uint8_t subghz_protocol_blocks_xor_bytes(uint8_t const message[], size_t size) {
     }
     return result;
 }
+
+bool subghz_protocol_blocks_key_is_degenerate(uint64_t data, uint8_t bit_count) {
+    if(bit_count == 0) {
+        return true;
+    }
+    if(bit_count > 64) {
+        bit_count = 64;
+    }
+
+    const uint64_t mask = (bit_count == 64) ? UINT64_MAX : ((1ULL << bit_count) - 1ULL);
+    data &= mask;
+
+    if((data == 0) || (data == mask)) {
+        return true;
+    }
+
+    if((data == (0xAAAAAAAAAAAAAAAAULL & mask)) || (data == (0x5555555555555555ULL & mask))) {
+        return true;
+    }
+
+    const uint8_t nibble_count = (uint8_t)((bit_count + 3U) / 4U);
+    uint8_t first = (uint8_t)(data & 0x0FU);
+    bool all_same = true;
+    uint8_t run_nibble = first;
+    uint8_t run_len = 1;
+    for(uint8_t i = 1; i < nibble_count; i++) {
+        uint8_t nibble = (uint8_t)((data >> (4U * i)) & 0x0FU);
+        if(nibble != first) {
+            all_same = false;
+        }
+        if(nibble == run_nibble) {
+            run_len++;
+            if(run_len >= 4) {
+                return true;
+            }
+        } else {
+            run_nibble = nibble;
+            run_len = 1;
+        }
+    }
+
+    return all_same;
+}

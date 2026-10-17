@@ -1,10 +1,3 @@
-/**
- * @file wii.c
- * Wii main menu style.
- *
- * Ported from Momentum Firmware (GPL-3.0), originally by Willy-JL (@WillyJL):
- * https://github.com/Next-Flip/Momentum-Firmware/commit/f1ec78deb3c03a8ab1c27a7a8c6e9222241ab48d
- */
 #include "menu_style_helpers.h"
 
 static void menu_style_wii_draw(Canvas* canvas, MenuModel* model) {
@@ -48,8 +41,6 @@ static void menu_style_wii_draw(Canvas* canvas, MenuModel* model) {
 static size_t menu_style_wii_navigate(MenuModel* model, InputKey key) {
     size_t position = model->position;
     size_t count = model->count;
-    // Up/Down below would underflow on a single item, and a style is expected to clamp rather
-    // than hand back a position that does not exist
     if(count < 2) return position;
     switch(key) {
     case InputKeyUp:

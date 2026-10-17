@@ -1,6 +1,7 @@
 import itertools
 import os
 import pathlib
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -19,6 +20,27 @@ from SCons.Node.FS import Entry, File
 
 _FAP_META_SECTION = ".fapmeta"
 _FAP_FILEASSETS_SECTION = ".fapassets"
+_API_METHOD_NAME = re.compile(r"API_METHOD\(\s*([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _parent_app_api_symbols(app: FlipperApplication) -> tuple:
+    """Names a plugin's host app resolves itself, in addition to the firmware API."""
+    if app.apptype != FlipperAppType.PLUGIN or not app._appmanager:
+        return ()
+    names = set()
+    for parent_id in app.requires:
+        try:
+            parent = app._appmanager.get(parent_id)
+        except FlipperManifestException:
+            continue
+        if not parent._apppath:
+            continue
+        api_dir = pathlib.Path(parent._apppath) / "api"
+        if not api_dir.is_dir():
+            continue
+        for header in api_dir.glob("*api_table*.h"):
+            names.update(_API_METHOD_NAME.findall(header.read_text(errors="replace")))
+    return tuple(sorted(names))
 
 
 def _plugin_fal_name(app):
@@ -155,9 +177,6 @@ class AppBuilder:
         )
 
         if self.app.fap_exclude_libs:
-            # Drop toolchain libs this app opts out of, so the symbols they
-            # provide stay undefined and get resolved from the firmware API
-            # table by the loader instead of being duplicated into the binary.
             excluded = set(self.app.fap_exclude_libs)
             self.app_env.Replace(
                 LIBS=[lib for lib in self.app_env["LIBS"] if lib not in excluded]
@@ -193,10 +212,12 @@ class AppBuilder:
         if self.app.embeds_plugins:
             self.app._assets_dirs.append(self.app_work_dir.Dir("assets"))
 
+        parent_api_syms = _parent_app_api_symbols(self.app)
         app_artifacts.validator = self.app_env.ValidateAppImports(
             app_artifacts.compact,
             _CHECK_APP=self.app.do_strict_import_checks
             and self.app_env.get("STRICT_FAP_IMPORT_CHECK"),
+            _PARENT_APP_API_SYMS=parent_api_syms,
         )[0]
 
         if self.app.apptype == FlipperAppType.PLUGIN:
@@ -338,7 +359,11 @@ def _validate_app_imports(target, source, env):
     with open(target[0].path, "rt") as f:
         for line in f:
             app_syms.add(line.split()[0])
-    unresolved_syms = app_syms - sdk_cache.get_valid_names()
+    unresolved_syms = (
+        app_syms
+        - sdk_cache.get_valid_names()
+        - set(env.get("_PARENT_APP_API_SYMS", ()))
+    )
     if unresolved_syms:
         warning_msg = fg.brightyellow(
             f"{source[0].path}: app may not be runnable. Symbols not resolved using firmware's API: "

@@ -1,0 +1,78 @@
+# Build firmware on PRs, pushes to dev or main, and on-demand.
+# Uploads dist/f7-C as a 14-day artifact. Does not create a GitHub Release
+# (that is release.yml, triggered by a version tag).
+
+name: The Doctor's Firmware
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FBT_NO_SYNC: 0
+  FORCE_NO_DIRTY: "yes"
+  FBT_GIT_SUBMODULE_SHALLOW: 1
+  WORKFLOW_BRANCH_OR_TAG: ${{ github.head_ref || github.ref_name }}
+
+jobs:
+  build:
+    name: The Doctor's Firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Init public submodules
+        run: git submodule update --init --recursive
+
+      - name: Version suffix
+        id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SHA="${{ github.event.pull_request.head.sha }}"
+            REF="${{ github.head_ref }}"
+          else
+            SHA="${{ github.sha }}"
+            REF="${{ github.ref_name }}"
+          fi
+          SHORT="${SHA:0:8}"
+          SAFE_REF="$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '-')"
+          echo "sha8=$SHORT" >> "$GITHUB_OUTPUT"
+          echo "ref=$SAFE_REF" >> "$GITHUB_OUTPUT"
+          echo "dist=${SAFE_REF}-${SHORT}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache fbt toolchain
+        uses: actions/cache@v6
+        with:
+          path: toolchain
+          key: fbt-toolchain-${{ runner.os }}-${{ hashFiles('fbt_options.py', 'scripts/toolchain/**') }}
+          restore-keys: |
+            fbt-toolchain-${{ runner.os }}-
+
+      - name: Build updater package
+        env:
+          DIST_SUFFIX: ${{ steps.vars.outputs.sha8 }}
+        run: ./fbt COMPACT=1 DEBUG=0 updater_package
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: doctor-fw-${{ steps.vars.outputs.dist }}
+          path: dist/f7-C/
+          retention-days: 14
+          if-no-files-found: error

@@ -10,8 +10,7 @@
         "furi_hal",
         "platform_specific",
         "ble_glue/furi_ble",
-        "ble_glue/services",
-        "ble_glue/profiles"
+        "ble_glue/services"
     ],
     "linker_script_flash": "stm32wb55xx_flash.ld",
     "linker_script_ram": "stm32wb55xx_ram_fw.ld",
@@ -27,20 +26,13 @@
         "fatfs",
         "subghz",
         "toolbox",
-        "nfc",
         "digital_signal",
         "pulse_reader",
         "signal_reader",
         "microtar",
         "usb_stm32",
-        "infrared",
         "assets",
-        "one_wire",
-        "ibutton",
-        "music_worker",
-        "mjs",
         "mbedtls",
-        "lfrfid",
         "flipper_application",
         "u8g2",
         "nanopb",
@@ -52,5 +44,20 @@
         "toolbox",
         "datetime",
         "ieee754_parse_wrap"
+    ],
+    "excluded_sources": [
+        "furi_hal_ibutton.c",
+        "furi_hal_rfid.c"
+    ],
+    "excluded_headers": [
+        "furi_hal_ibutton.h"
+    ],
+    "excluded_modules": [
+        "lfrfid",
+        "ibutton",
+        "one_wire",
+        "mjs",
+        "music_worker",
+        "nfc"
     ]
 }

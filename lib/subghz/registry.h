@@ -43,6 +43,10 @@ const SubGhzProtocol* subghz_protocol_registry_get_by_index(
  */
 size_t subghz_protocol_registry_count(const SubGhzProtocolRegistry* protocol_registry);
 
+const char* subghz_protocol_name_canonical(const char* name);
+
+bool subghz_protocol_names_match(const char* a, const char* b);
+
 #ifdef __cplusplus
 }
 #endif

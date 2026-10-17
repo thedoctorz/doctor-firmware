@@ -135,7 +135,7 @@ static bool
     //instance->generic.cnt = (data >> 24) & 0xFFFF;
     //instance->generic.serial = data & 0xFFFFFF;
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(btn);
     }
 
@@ -241,7 +241,7 @@ bool subghz_protocol_somfy_keytis_create_data(
 /**
  * Generating an upload from data.
  * @param instance Pointer to a SubGhzProtocolEncoderSomfyKeytis instance
- * @return true Always; this encoder has no failure path
+ * @return true On success
  */
 static bool subghz_protocol_encoder_somfy_keytis_get_upload(
     SubGhzProtocolEncoderSomfyKeytis* instance,
@@ -716,7 +716,7 @@ static void subghz_protocol_somfy_keytis_check_remote_controller(SubGhzBlockGene
     instance->serial = data & 0xFFFFFF;
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
     subghz_custom_btn_set_max(1);

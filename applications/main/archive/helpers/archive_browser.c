@@ -467,6 +467,7 @@ void archive_switch_tab(ArchiveBrowserView* browser, InputKey key) {
     furi_assert(browser);
     ArchiveTabEnum tab = archive_get_tab(browser);
 
+    browser->search_running = false;
     browser->last_tab_switch_dir = key;
 
     if(key == InputKeyLeft) {

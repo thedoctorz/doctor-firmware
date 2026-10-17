@@ -21,6 +21,10 @@ bool subghz_device_registry_is_valid(void);
  */
 const SubGhzDevice* subghz_device_registry_get_by_name(const char* name);
 
+bool subghz_device_registry_is_connect(const char* name);
+
+bool subghz_device_registry_is_loaded(const char* name);
+
 /**
  * Registration subghzdevice by index in array SubGhzDevice.
  * @param index SubGhzDevice by index in array

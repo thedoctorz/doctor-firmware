@@ -13,6 +13,7 @@
 
 #include <furi.h>
 #include <cc1101.h>
+#include <cc1101_image.h>
 #include <stdio.h>
 
 #define TAG "FuriHalSubGhz"
@@ -65,6 +66,71 @@ volatile FuriHalSubGhz furi_hal_subghz = {
     .dangerous_frequency_i = false,
 };
 
+static CC1101Image furi_hal_subghz_por;
+static CC1101Image furi_hal_subghz_shadow;
+static bool furi_hal_subghz_por_valid = false;
+static bool furi_hal_subghz_shadow_valid = false;
+static FuriHalSubGhzPath furi_hal_subghz_path = FuriHalSubGhzPathIsolate;
+static bool furi_hal_subghz_path_valid = false;
+static uint32_t furi_hal_subghz_hop_frequency = 0;
+static bool furi_hal_subghz_hop_spi_held = false;
+
+#define FURI_HAL_SUBGHZ_FSCAL_CACHE_SIZE 16
+#define FURI_HAL_SUBGHZ_FSCAL_TTL_MS     30000
+
+typedef struct {
+    uint32_t frequency;
+    uint32_t stamp;
+    uint8_t fsctrl1, fsctrl0, channr, mdmcfg1, mdmcfg0;
+    uint8_t fscal3, fscal2, fscal1;
+} FuriHalSubGhzFscalEntry;
+
+static FuriHalSubGhzFscalEntry furi_hal_subghz_fscal[FURI_HAL_SUBGHZ_FSCAL_CACHE_SIZE];
+
+void furi_hal_subghz_shadow_invalidate(void) {
+    furi_hal_subghz_shadow_valid = false;
+    furi_hal_subghz_path_valid = false;
+    furi_hal_subghz_hop_frequency = 0;
+}
+
+void furi_hal_subghz_hop_cache_reset(void) {
+    memset(furi_hal_subghz_fscal, 0, sizeof(furi_hal_subghz_fscal));
+}
+
+static FuriHalSubGhzFscalEntry*
+    furi_hal_subghz_fscal_find(uint32_t frequency, const CC1101Image* image) {
+    const uint32_t now = furi_get_tick();
+    const bool match_mdmcfg = (image->reg[CC1101_CHANNR] != 0);
+
+    for(size_t i = 0; i < FURI_HAL_SUBGHZ_FSCAL_CACHE_SIZE; i++) {
+        FuriHalSubGhzFscalEntry* e = &furi_hal_subghz_fscal[i];
+        if(e->frequency != frequency) continue;
+        if(e->fsctrl1 != image->reg[CC1101_FSCTRL1]) continue;
+        if(e->fsctrl0 != image->reg[CC1101_FSCTRL0]) continue;
+        if(e->channr != image->reg[CC1101_CHANNR]) continue;
+
+        if(match_mdmcfg) {
+            if(e->mdmcfg1 != image->reg[CC1101_MDMCFG1]) continue;
+            if(e->mdmcfg0 != image->reg[CC1101_MDMCFG0]) continue;
+        }
+
+        if((now - e->stamp) > furi_ms_to_ticks(FURI_HAL_SUBGHZ_FSCAL_TTL_MS)) continue;
+        return e;
+    }
+    return NULL;
+}
+
+static FuriHalSubGhzFscalEntry* furi_hal_subghz_fscal_slot(void) {
+    FuriHalSubGhzFscalEntry* oldest = &furi_hal_subghz_fscal[0];
+
+    for(size_t i = 0; i < FURI_HAL_SUBGHZ_FSCAL_CACHE_SIZE; i++) {
+        FuriHalSubGhzFscalEntry* e = &furi_hal_subghz_fscal[i];
+        if(e->frequency == 0) return e;
+        if(e->stamp < oldest->stamp) oldest = e;
+    }
+    return oldest;
+}
+
 int32_t furi_hal_subghz_get_rolling_counter_mult(void) {
     return furi_hal_subghz.rolling_counter_mult;
 }
@@ -111,6 +177,10 @@ void furi_hal_subghz_init(void) {
         // Reset
         furi_hal_gpio_init(&gpio_cc1101_g0, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
         cc1101_reset(&furi_hal_spi_bus_handle_subghz);
+
+        cc1101_image_read(&furi_hal_spi_bus_handle_subghz, &furi_hal_subghz_por);
+        furi_hal_subghz_por_valid = true;
+
         cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_IOCFG0, CC1101IocfgHighImpedance);
 
         // Prepare GD0 for power on self test
@@ -175,6 +245,8 @@ void furi_hal_subghz_sleep(void) {
     cc1101_shutdown(&furi_hal_spi_bus_handle_subghz);
 
     furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+
+    furi_hal_subghz_shadow_invalidate();
 }
 
 void furi_hal_subghz_dump_state(void) {
@@ -195,10 +267,19 @@ void furi_hal_subghz_load_custom_preset(const uint8_t* preset_data) {
     uint32_t i = 0;
     uint8_t pa[8] = {0};
     while(preset_data[i]) {
-        cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, preset_data[i], preset_data[i + 1]);
+        if((preset_data[i] & 0xC0) == 0) {
+            cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, preset_data[i], preset_data[i + 1]);
+        }
         i += 2;
     }
     furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+
+    if(furi_hal_subghz_por_valid) {
+        furi_hal_subghz_shadow = furi_hal_subghz_por;
+        furi_hal_subghz_shadow.reg[CC1101_IOCFG0] = CC1101IocfgHighImpedance;
+        cc1101_image_apply_preset(&furi_hal_subghz_shadow, preset_data, &furi_hal_subghz_shadow);
+        furi_hal_subghz_shadow_valid = true;
+    }
 
     //load pa table
     memcpy(&pa[0], &preset_data[i + 2], 8);
@@ -225,10 +306,19 @@ void furi_hal_subghz_load_registers(const uint8_t* data) {
     furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
     uint32_t i = 0;
     while(data[i]) {
-        cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, data[i], data[i + 1]);
+        if((data[i] & 0xC0) == 0) {
+            cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, data[i], data[i + 1]);
+        }
         i += 2;
     }
     furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+
+    if(furi_hal_subghz_por_valid) {
+        furi_hal_subghz_shadow = furi_hal_subghz_por;
+        furi_hal_subghz_shadow.reg[CC1101_IOCFG0] = CC1101IocfgHighImpedance;
+        cc1101_image_apply_preset(&furi_hal_subghz_shadow, data, &furi_hal_subghz_shadow);
+        furi_hal_subghz_shadow_valid = true;
+    }
 }
 
 void furi_hal_subghz_load_patable(const uint8_t data[8]) {
@@ -302,6 +392,8 @@ void furi_hal_subghz_shutdown(void) {
     // Reset and shutdown
     cc1101_shutdown(&furi_hal_spi_bus_handle_subghz);
     furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+
+    furi_hal_subghz_shadow_invalidate();
 }
 
 void furi_hal_subghz_reset(void) {
@@ -312,6 +404,16 @@ void furi_hal_subghz_reset(void) {
     // Warning: push pull cc1101 clock output on GD0
     cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_IOCFG0, CC1101IocfgHighImpedance);
     furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+
+    if(furi_hal_subghz_por_valid) {
+        furi_hal_subghz_shadow = furi_hal_subghz_por;
+        furi_hal_subghz_shadow.reg[CC1101_IOCFG0] = CC1101IocfgHighImpedance;
+        furi_hal_subghz_shadow_valid = true;
+    } else {
+        furi_hal_subghz_shadow_valid = false;
+    }
+    furi_hal_subghz_path_valid = false;
+    furi_hal_subghz_hop_frequency = 0;
 }
 
 void furi_hal_subghz_idle(void) {
@@ -363,6 +465,43 @@ uint8_t furi_hal_subghz_get_lqi(void) {
     return data[0] & 0x7F;
 }
 
+int8_t furi_hal_subghz_get_freq_est(void) {
+    furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
+    uint8_t data[1];
+    cc1101_read_reg(&furi_hal_spi_bus_handle_subghz, CC1101_STATUS_FREQEST | CC1101_BURST, data);
+    furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+    return (int8_t)data[0];
+}
+
+static inline uint8_t furi_hal_subghz_rssi_raw(void) {
+    uint8_t tx[2] = {CC1101_STATUS_RSSI | CC1101_BURST | CC1101_READ, 0};
+    uint8_t rx[2] = {0};
+    furi_hal_spi_bus_trx(&furi_hal_spi_bus_handle_subghz, tx, rx, 2, CC1101_TIMEOUT);
+    return rx[1];
+}
+
+uint32_t furi_hal_subghz_rssi_burst(uint8_t* out, size_t count, uint32_t period_us) {
+    furi_check(out);
+    if(count == 0) return 0;
+
+    const uint32_t cycles_per_us = furi_hal_cortex_instructions_per_microsecond();
+    const uint32_t period_cycles = period_us * cycles_per_us;
+
+    const bool spi_owned = furi_hal_subghz_hop_spi_held;
+    if(!spi_owned) furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
+    const uint32_t t0 = DWT->CYCCNT;
+    for(size_t i = 0; i < count; i++) {
+        const uint32_t deadline = t0 + (uint32_t)i * period_cycles;
+        while((int32_t)(DWT->CYCCNT - deadline) < 0) {
+        }
+        out[i] = furi_hal_subghz_rssi_raw();
+    }
+    const uint32_t span = DWT->CYCCNT - t0;
+    if(!spi_owned) furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+
+    return span / cycles_per_us;
+}
+
 /* 
  Modified by @tkerby & MX to the full YARD Stick One extended range of 281-361 MHz, 378-481 MHz, and 749-962 MHz. 
  These changes are at your own risk. The PLL may not lock and FZ devs have warned of possible damage!
@@ -378,18 +517,24 @@ bool furi_hal_subghz_is_frequency_valid(uint32_t value) {
     return true;
 }
 
-uint32_t furi_hal_subghz_set_frequency_and_path(uint32_t value) {
-    // Set these values to the extended frequency range only. They dont define if you can transmit but do select the correct RF path
-    value = furi_hal_subghz_set_frequency(value);
+static FuriHalSubGhzPath furi_hal_subghz_path_for_frequency(uint32_t value) {
     if(value >= 281000000 && value <= 361000000) {
-        furi_hal_subghz_set_path(FuriHalSubGhzPath315);
+        return FuriHalSubGhzPath315;
     } else if(value >= 378000000 && value <= 481000000) {
-        furi_hal_subghz_set_path(FuriHalSubGhzPath433);
+        return FuriHalSubGhzPath433;
     } else if(value >= 749000000 && value <= 962000000) {
-        furi_hal_subghz_set_path(FuriHalSubGhzPath868);
-    } else {
+        return FuriHalSubGhzPath868;
+    }
+    return FuriHalSubGhzPathIsolate;
+}
+
+uint32_t furi_hal_subghz_set_frequency_and_path(uint32_t value) {
+    value = furi_hal_subghz_set_frequency(value);
+    FuriHalSubGhzPath path = furi_hal_subghz_path_for_frequency(value);
+    if(path == FuriHalSubGhzPathIsolate) {
         furi_crash("SubGhz: Incorrect frequency during set.");
     }
+    furi_hal_subghz_set_path(path);
     return value;
 }
 
@@ -412,12 +557,16 @@ bool furi_hal_subghz_is_tx_allowed(uint32_t value) {
     return true;
 }
 
-uint32_t furi_hal_subghz_set_frequency(uint32_t value) {
+static void furi_hal_subghz_update_regulation(uint32_t value) {
     if(furi_hal_subghz_is_tx_allowed(value)) {
         furi_hal_subghz.regulation = SubGhzRegulationTxRx;
     } else {
         furi_hal_subghz.regulation = SubGhzRegulationOnlyRx;
     }
+}
+
+uint32_t furi_hal_subghz_set_frequency(uint32_t value) {
+    furi_hal_subghz_update_regulation(value);
 
     furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
     uint32_t real_frequency = cc1101_set_frequency(&furi_hal_spi_bus_handle_subghz, value);
@@ -426,11 +575,12 @@ uint32_t furi_hal_subghz_set_frequency(uint32_t value) {
     furi_check(cc1101_wait_status_state(&furi_hal_spi_bus_handle_subghz, CC1101StateIDLE, 10000));
 
     furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+
+    furi_hal_subghz_hop_frequency = value;
     return real_frequency;
 }
 
-void furi_hal_subghz_set_path(FuriHalSubGhzPath path) {
-    furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
+static void furi_hal_subghz_set_path_locked(FuriHalSubGhzPath path) {
     if(path == FuriHalSubGhzPath433) {
         furi_hal_gpio_write(&gpio_rf_sw_0, 0);
         cc1101_write_reg(
@@ -448,6 +598,18 @@ void furi_hal_subghz_set_path(FuriHalSubGhzPath path) {
     } else {
         furi_crash("SubGhz: Incorrect path during set.");
     }
+
+    furi_hal_subghz_path = path;
+    furi_hal_subghz_path_valid = true;
+    furi_hal_subghz_shadow.reg[CC1101_IOCFG2] =
+        (path == FuriHalSubGhzPath315 || path == FuriHalSubGhzPathIsolate) ?
+            CC1101IocfgHW :
+            (CC1101IocfgHW | CC1101_IOCFG_INV);
+}
+
+void furi_hal_subghz_set_path(FuriHalSubGhzPath path) {
+    furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
+    furi_hal_subghz_set_path_locked(path);
     furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
 }
 
@@ -597,6 +759,174 @@ void furi_hal_subghz_stop_async_rx(void) {
     furi_hal_interrupt_set_isr(FuriHalInterruptIdTIM2, NULL, NULL);
 
     furi_hal_gpio_init(&gpio_cc1101_g0, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+}
+
+#define FURI_HAL_SUBGHZ_FS_AUTOCAL_MASK 0x30
+
+#define FURI_HAL_SUBGHZ_FSCAL1_UNLOCKED 0x3F
+
+#define FURI_HAL_SUBGHZ_HOP_STATE_TIMEOUT_US 10000
+
+#define FURI_HAL_SUBGHZ_HOP_CAL_TIMEOUT_US 20000
+
+bool furi_hal_subghz_hop_begin(void) {
+    if(furi_hal_subghz.state != SubGhzStateAsyncRx) return false;
+    if(!furi_hal_subghz_por_valid || !furi_hal_subghz_shadow_valid) return false;
+    if(!furi_hal_subghz_hop_spi_held) {
+        furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
+        furi_hal_subghz_hop_spi_held = true;
+    }
+    return true;
+}
+
+bool furi_hal_subghz_hop_prepare(uint32_t frequency) {
+    return furi_hal_subghz_is_frequency_valid(frequency);
+}
+
+void furi_hal_subghz_hop_end(void) {
+    if(!furi_hal_subghz_hop_spi_held) return;
+    furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+    furi_hal_subghz_hop_spi_held = false;
+}
+
+static bool furi_hal_subghz_hop_calibrate(uint32_t frequency, const CC1101Image* image) {
+    cc1101_calibrate(&furi_hal_spi_bus_handle_subghz);
+    if(!cc1101_wait_status_state(
+           &furi_hal_spi_bus_handle_subghz, CC1101StateIDLE, FURI_HAL_SUBGHZ_HOP_CAL_TIMEOUT_US)) {
+        return false;
+    }
+
+    uint8_t fscal3 = 0, fscal2 = 0, fscal1 = 0;
+    cc1101_read_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL3, &fscal3);
+    cc1101_read_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL2, &fscal2);
+    cc1101_read_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL1, &fscal1);
+
+    if(fscal1 == FURI_HAL_SUBGHZ_FSCAL1_UNLOCKED) {
+        FURI_LOG_W(TAG, "PLL not locked at %lu Hz", frequency);
+        return false;
+    }
+
+    FuriHalSubGhzFscalEntry* e = furi_hal_subghz_fscal_slot();
+    e->frequency = frequency;
+    e->stamp = furi_get_tick();
+    e->fsctrl1 = image->reg[CC1101_FSCTRL1];
+    e->fsctrl0 = image->reg[CC1101_FSCTRL0];
+    e->channr = image->reg[CC1101_CHANNR];
+    e->mdmcfg1 = image->reg[CC1101_MDMCFG1];
+    e->mdmcfg0 = image->reg[CC1101_MDMCFG0];
+    e->fscal3 = fscal3;
+    e->fscal2 = fscal2;
+    e->fscal1 = fscal1;
+    return true;
+}
+
+bool furi_hal_subghz_hop_goto(uint32_t frequency, const uint8_t* preset_data) {
+    furi_check(preset_data);
+
+    if(furi_hal_subghz.state != SubGhzStateAsyncRx) return false;
+    if(!furi_hal_subghz_por_valid || !furi_hal_subghz_shadow_valid) return false;
+
+    const FuriHalSubGhzPath path = furi_hal_subghz_path_for_frequency(frequency);
+    if(path == FuriHalSubGhzPathIsolate) return false;
+
+    CC1101Image target;
+    cc1101_image_apply_preset(&furi_hal_subghz_por, preset_data, &target);
+
+    target.reg[CC1101_MCSM0] &= (uint8_t)~FURI_HAL_SUBGHZ_FS_AUTOCAL_MASK;
+
+    uint8_t prog[CC1101_IMAGE_PROG_MAX];
+    const size_t prog_len =
+        cc1101_image_diff(&furi_hal_subghz_shadow, &target, prog, sizeof(prog));
+
+    const bool retune = (frequency != furi_hal_subghz_hop_frequency);
+    const bool repath = (!furi_hal_subghz_path_valid || path != furi_hal_subghz_path);
+    const FuriHalSubGhzFscalEntry* cached = furi_hal_subghz_fscal_find(frequency, &target);
+
+    LL_TIM_CC_DisableChannel(TIM2, LL_TIM_CHANNEL_CH1);
+    LL_TIM_CC_DisableChannel(TIM2, LL_TIM_CHANNEL_CH2);
+
+    const bool spi_owned = furi_hal_subghz_hop_spi_held;
+    if(!spi_owned) {
+        furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
+    }
+
+    cc1101_switch_to_idle(&furi_hal_spi_bus_handle_subghz);
+    bool ok = cc1101_wait_status_state(
+        &furi_hal_spi_bus_handle_subghz, CC1101StateIDLE, FURI_HAL_SUBGHZ_HOP_STATE_TIMEOUT_US);
+
+    if(ok) {
+        cc1101_image_write_prog(&furi_hal_spi_bus_handle_subghz, prog, prog_len);
+
+        if(retune) {
+            cc1101_set_frequency(&furi_hal_spi_bus_handle_subghz, frequency);
+            furi_hal_subghz_update_regulation(frequency);
+        }
+        if(repath) {
+            furi_hal_subghz_set_path_locked(path);
+        }
+
+        if(cached) {
+            if(retune) {
+                cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL3, cached->fscal3);
+                cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL2, cached->fscal2);
+                cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL1, cached->fscal1);
+            }
+        } else {
+            ok = furi_hal_subghz_hop_calibrate(frequency, &target);
+        }
+    }
+
+    if(ok) {
+        cc1101_switch_to_rx(&furi_hal_spi_bus_handle_subghz);
+        ok = cc1101_wait_status_state(
+            &furi_hal_spi_bus_handle_subghz, CC1101StateRX, FURI_HAL_SUBGHZ_HOP_STATE_TIMEOUT_US);
+    }
+
+    if(!spi_owned) {
+        furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+    }
+
+    if(ok) {
+        target.reg[CC1101_IOCFG2] = furi_hal_subghz_shadow.reg[CC1101_IOCFG2];
+        furi_hal_subghz_shadow = target;
+        furi_hal_subghz_hop_frequency = frequency;
+    } else {
+        furi_hal_subghz_shadow_invalidate();
+        FURI_LOG_W(TAG, "Hop failed, shadow invalidated");
+    }
+
+    return ok;
+}
+
+void furi_hal_subghz_hop_resume(void) {
+    if(furi_hal_subghz.state != SubGhzStateAsyncRx) return;
+
+    LL_TIM_SetCounter(TIM2, 0);
+    LL_TIM_ClearFlag_CC1(TIM2);
+    LL_TIM_ClearFlag_CC2(TIM2);
+    LL_TIM_CC_EnableChannel(TIM2, LL_TIM_CHANNEL_CH1);
+    LL_TIM_CC_EnableChannel(TIM2, LL_TIM_CHANNEL_CH2);
+}
+
+bool furi_hal_subghz_hop_read_image(uint8_t* out) {
+    furi_check(out);
+
+    const bool spi_owned = furi_hal_subghz_hop_spi_held;
+    if(!spi_owned) {
+        furi_hal_spi_acquire(&furi_hal_spi_bus_handle_subghz);
+    }
+    cc1101_image_read(&furi_hal_spi_bus_handle_subghz, (CC1101Image*)out);
+    if(!spi_owned) {
+        furi_hal_spi_release(&furi_hal_spi_bus_handle_subghz);
+    }
+    return true;
+}
+
+bool furi_hal_subghz_hop_get_shadow(uint8_t* out) {
+    furi_check(out);
+    if(!furi_hal_subghz_shadow_valid) return false;
+    memcpy(out, furi_hal_subghz_shadow.reg, CC1101_IMAGE_REG_COUNT);
+    return true;
 }
 
 typedef enum {

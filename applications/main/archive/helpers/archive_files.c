@@ -16,26 +16,15 @@ void archive_set_file_type(ArchiveFile_t* file, const char* path, bool is_folder
         for(size_t i = 0; i < COUNT_OF(known_ext); i++) {
             if((known_ext[i][0] == '?') || (known_ext[i][0] == '*')) continue;
             if(furi_string_end_withi(file->path, known_ext[i])) {
-                if((i == ArchiveFileTypeBadUsb) || (i == ArchiveFileTypeSubGhzRemote)) {
-                    if((furi_string_search(file->path, EXT_PATH("badusb")) == 0) ||
-                       (furi_string_search(file->path, ANY_PATH("badusb")) == 0)) {
-                        file->type = ArchiveFileTypeBadUsb;
-                        return; // *.txt file is a BadUSB script only if it is in BadUSB folder
-                    }
-                    if((furi_string_search(file->path, EXT_PATH("subghz_remote")) == 0) ||
-                       (furi_string_search(file->path, ANY_PATH("subghz_remote")) == 0)) {
-                        file->type = ArchiveFileTypeSubGhzRemote;
-                        return; // *.txt file is a SubRem map file only if it is in SubRem folder
-                    }
-                } else {
-                    file->type = i;
-                    return;
-                }
+                file->type = i;
+                return;
             }
         }
 
         if(is_folder) {
             file->type = ArchiveFileTypeFolder;
+        } else if(furi_string_end_withi(file->path, ".psf")) {
+            file->type = ArchiveFileTypeSubGhz;
         } else {
             char tmp_extension[MAX_EXT_LEN];
             path_extract_extension(file->path, tmp_extension, MAX_EXT_LEN);

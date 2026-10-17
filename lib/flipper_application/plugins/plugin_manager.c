@@ -141,7 +141,6 @@ PluginManagerError plugin_manager_load_all_prefixed(
                 FURI_LOG_D(TAG, "Not ours, skipping %s", file_name_buffer);
                 continue;
             }
-
             path_concat(path, file_name_buffer, file_name);
             FURI_LOG_D(TAG, "Loading %s", furi_string_get_cstr(file_name));
             PluginManagerError error =

@@ -9,7 +9,6 @@
 bool findmy_state_load(FindMyState* out_state) {
     FindMyState state;
 
-    // Try to load from file
     bool loaded_from_file = false;
     Storage* storage = furi_record_open(RECORD_STORAGE);
     if(storage_file_exists(storage, FINDMY_STATE_PATH)) {
@@ -37,7 +36,6 @@ bool findmy_state_load(FindMyState* out_state) {
             state.tag_type = tmp;
 
             if(!flipper_format_read_bool(file, "show_mac", &state.show_mac, 1)) {
-                // Support migrating from old config
                 state.show_mac = false;
                 flipper_format_rewind(file);
             }
@@ -55,7 +53,6 @@ bool findmy_state_load(FindMyState* out_state) {
     }
     furi_record_close(RECORD_STORAGE);
 
-    // Otherwise set default values
     if(!loaded_from_file) {
         state.beacon_active = false;
         state.broadcast_interval = 5;
@@ -63,36 +60,30 @@ bool findmy_state_load(FindMyState* out_state) {
         state.show_mac = false;
         state.tag_type = FindMyTypeApple;
 
-        // Set default mac
         uint8_t default_mac[EXTRA_BEACON_MAC_ADDR_SIZE] = {0x66, 0x55, 0x44, 0x33, 0x22, 0x11};
         memcpy(state.mac, default_mac, sizeof(state.mac));
 
-        // Set default empty AirTag data
         uint8_t* data = state.data;
-        *data++ = 0x1E; // Length
-        *data++ = 0xFF; // Manufacturer Specific Data
-        *data++ = 0x4C; // Company ID (Apple, Inc.)
-        *data++ = 0x00; // ...
-        *data++ = 0x12; // Type (FindMy)
-        *data++ = 0x19; // Length
-        *data++ = 0x00; //  Battery Status set to Full
-        // Placeholder Empty Public Key without the MAC address
+        *data++ = 0x1E;
+        *data++ = 0xFF;
+        *data++ = 0x4C;
+        *data++ = 0x00;
+        *data++ = 0x12;
+        *data++ = 0x19;
+        *data++ = 0x00;
         for(size_t i = 0; i < 22; ++i) {
             *data++ = 0x00;
         }
-        *data++ = 0x00; // First 2 bits are the version
-        *data++ = 0x00; // Hint (0x00)
+        *data++ = 0x00;
+        *data++ = 0x00;
     }
 
-    // Copy to caller state before popping stack
     memcpy(out_state, &state, sizeof(state));
 
-    // Return if active, can be used to start after loading in an if statement
     return state.beacon_active;
 }
 
 static void findmy_state_update_payload_battery(FindMyState* state) {
-    // Update the battery level in the payload
     if(state->tag_type == FindMyTypeApple) {
         uint32_t battery_capacity = furi_hal_power_get_battery_full_capacity();
         uint32_t battery_remaining = furi_hal_power_get_battery_remaining_capacity();
@@ -113,16 +104,12 @@ static void findmy_state_update_payload_battery(FindMyState* state) {
 }
 
 void findmy_state_apply(FindMyState* state) {
-    // This function applies configured state to the beacon (loaded values)
-
-    // Stop beacon before configuring
     if(furi_hal_bt_extra_beacon_is_active()) {
         furi_check(furi_hal_bt_extra_beacon_stop());
     }
 
-    // Make config struct from configured parameters and set it
     GapExtraBeaconConfig config = {
-        .min_adv_interval_ms = state->broadcast_interval * 1000, // Converting s to ms
+        .min_adv_interval_ms = state->broadcast_interval * 1000,
         .max_adv_interval_ms = (state->broadcast_interval * 1000) + 150,
         .adv_channel_map = GapAdvChannelMapAll,
         .adv_power_level = GapAdvPowerLevel_0dBm + state->transmit_power,
@@ -131,12 +118,10 @@ void findmy_state_apply(FindMyState* state) {
     memcpy(config.address, state->mac, sizeof(config.address));
     furi_check(furi_hal_bt_extra_beacon_set_config(&config));
 
-    // Update data payload with battery level and set it
     findmy_state_update_payload_battery(state);
     furi_check(
         furi_hal_bt_extra_beacon_set_data(state->data, findmy_state_data_size(state->tag_type)));
 
-    // Start beacon if configured
     if(state->beacon_active) {
         furi_check(furi_hal_bt_extra_beacon_start());
     }

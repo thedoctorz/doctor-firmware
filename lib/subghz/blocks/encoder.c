@@ -1,6 +1,7 @@
 #include "encoder.h"
 #include "math.h"
 #include <core/check.h>
+#include <stddef.h>
 
 #define TAG "SubGhzBlockEncoder"
 
@@ -56,4 +57,29 @@ size_t subghz_protocol_blocks_get_upload_from_bit_array(
     upload[size_upload++] = level_duration_make(
         subghz_protocol_blocks_get_bit_array(data_array, index_bit - 1), duration);
     return size_upload;
+}
+
+typedef struct {
+    SubGhzProtocolEncoderBase base;
+    SubGhzProtocolBlockEncoder encoder;
+} SubGhzProtocolBlockEncoderLayout;
+
+bool subghz_protocol_blocks_get_upload_from_encoder(
+    void* encoder_context,
+    const LevelDuration** upload,
+    size_t* size) {
+    furi_check(encoder_context);
+    furi_check(upload);
+    furi_check(size);
+
+    SubGhzProtocolBlockEncoder* block_encoder =
+        &((SubGhzProtocolBlockEncoderLayout*)encoder_context)->encoder;
+
+    if(!block_encoder->upload || block_encoder->size_upload == 0) {
+        return false;
+    }
+
+    *upload = block_encoder->upload;
+    *size = block_encoder->size_upload;
+    return true;
 }

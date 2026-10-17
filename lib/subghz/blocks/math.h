@@ -217,6 +217,8 @@ uint8_t subghz_protocol_blocks_parity_bytes(uint8_t const message[], size_t size
  */
 uint8_t subghz_protocol_blocks_xor_bytes(uint8_t const message[], size_t size);
 
+bool subghz_protocol_blocks_key_is_degenerate(uint64_t data, uint8_t bit_count);
+
 #ifdef __cplusplus
 }
 #endif

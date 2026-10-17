@@ -110,8 +110,7 @@ static LevelDuration
 
 /**
  * Generating an upload from data.
- * @param context Pointer to a SubGhzProtocolEncoderRevers_RB2 instance
- * @return true On success
+ * @param instance Pointer to a SubGhzProtocolEncoderRevers_RB2 instance
  */
 static void subghz_protocol_revers_rb2_remote_controller(SubGhzBlockGeneric* instance);
 

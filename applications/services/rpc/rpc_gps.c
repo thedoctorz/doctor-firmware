@@ -98,7 +98,7 @@ void* rpc_gps_alloc(RpcSession* session) {
     RpcGps* rpc_gps = malloc(sizeof(RpcGps));
     rpc_gps->session = session;
     rpc_gps->gps = furi_record_open(RECORD_GPS);
-    rpc_gps->request = malloc(sizeof(PB_Main));
+    rpc_gps->request = rpc_message_alloc();
 
     RpcHandler rpc_handler = {
         .message_handler = rpc_gps_on_location,

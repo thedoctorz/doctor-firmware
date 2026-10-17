@@ -159,8 +159,9 @@ void pulse_reader_start(PulseReader* signal) {
     /* generator 0 gets fed by EXTI_LINEn */
     LL_DMAMUX_SetRequestSignalID(
         NULL, LL_DMAMUX_REQ_GEN_0, GET_DMAMUX_EXTI_LINE(signal->gpio->pin));
-    /* trigger on rising edge of the interrupt */
-    LL_DMAMUX_SetRequestGenPolarity(NULL, LL_DMAMUX_REQ_GEN_0, LL_DMAMUX_REQ_GEN_POL_RISING);
+    /* Both edges — rising-only made every falling sample a LOST_EDGE (E0). */
+    LL_DMAMUX_SetRequestGenPolarity(
+        NULL, LL_DMAMUX_REQ_GEN_0, LL_DMAMUX_REQ_GEN_POL_RISING_FALLING);
     /* now enable request generation again */
     LL_DMAMUX_EnableRequestGen(NULL, LL_DMAMUX_REQ_GEN_0);
 

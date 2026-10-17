@@ -12,7 +12,6 @@ static const char* parse_nrf_connect(FindMy* app, const char* path) {
     Stream* stream = file_stream_alloc(app->storage);
     FuriString* line = furi_string_alloc();
     do {
-        // XX-XX-XX-XX-XX-XX_YYYY-MM-DD HH_MM_SS.txt
         error = "Filename must\nhave MAC\naddress";
         uint8_t mac[EXTRA_BEACON_MAC_ADDR_SIZE];
         path_extract_filename_no_ext(path, line);
@@ -33,7 +32,6 @@ static const char* parse_nrf_connect(FindMy* app, const char* path) {
         error = "Can't open file";
         if(!file_stream_open(stream, path, FSAM_READ, FSOM_OPEN_EXISTING)) break;
 
-        // YYYY-MM-DD HH:MM:SS.ms, XX dBm, 0xXXXXX
         error = "Wrong file format";
         if(!stream_read_line(stream, line)) break;
         const char* marker = " dBm, 0x";
@@ -48,7 +46,6 @@ static const char* parse_nrf_connect(FindMy* app, const char* path) {
         FURI_LOG_I("ImportPayload", "Line Size: %d", line_size);
         FURI_LOG_I("ImportPayload", "Data Size: %d", data_size * 2);
         if(line_size != data_size * 2) break;
-        // Initialize full data to 0's, then fill only first data_size bytes
         uint8_t data[EXTRA_BEACON_MAX_DATA_SIZE] = {0};
         error = NULL;
         for(size_t i = 0; i < data_size; i++) {
@@ -112,15 +109,9 @@ static const char* parse_open_haystack(FindMy* app, const char* path) {
         findmy_reverse_mac_addr(app->state.mac);
 
         uint8_t advertisement_template[EXTRA_BEACON_MAX_DATA_SIZE] = {
-            0x1e, // length (30)
-            0xff, // manufacturer specific data
-            0x4c, 0x00, // company ID (Apple)
-            0x12, 0x19, // offline finding type and length
-            0x00, //state
+            0x1e, 0xff, 0x4c, 0x00, 0x12, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, // first two bits of key[0]
-            0x00, // hint
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         };
         memcpy(app->state.data, advertisement_template, sizeof(app->state.data));
         memcpy(&app->state.data[7], &public_key[6], decoded_len - 6);
@@ -149,15 +140,12 @@ void findmy_scene_config_import_on_enter(void* context) {
     VariableItemList* var_item_list = app->var_item_list;
     VariableItem* item;
 
-    //variable_item_list_set_header(var_item_list, "Choose file type");
-
     item = variable_item_list_add(var_item_list, "nRF Connect (.txt)", 0, NULL, NULL);
 
     item = variable_item_list_add(var_item_list, "OpenHaystack (.keys)", 0, NULL, NULL);
 
     item = variable_item_list_add(var_item_list, "Register Tag Manually", 0, NULL, NULL);
 
-    // This scene acts more like a submenu than a var item list tbh
     UNUSED(item);
 
     variable_item_list_set_enter_callback(var_item_list, findmy_scene_config_import_callback, app);
@@ -202,8 +190,6 @@ bool findmy_scene_config_import_on_event(void* context, SceneManagerEvent event)
         storage_simply_mkdir(app->storage, browser_options.base_path);
         FuriString* path = furi_string_alloc_set_str(browser_options.base_path);
         if(dialog_file_browser_show(app->dialogs, path, path, &browser_options)) {
-            // The parse functions return the error text, or NULL for success
-            // Used in result to show success or error message
             const char* error = NULL;
             switch(event.event) {
             case VarItemListIndexNrfConnect:

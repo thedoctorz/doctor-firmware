@@ -4,6 +4,7 @@
 #include <subghz/types.h>
 #include <lib/toolbox/path.h>
 #include <float_tools.h>
+#include <stdint.h>
 #include "subghz_i.h"
 
 #define TAG "SubGhzApp"
@@ -20,9 +21,34 @@ bool subghz_back_event_callback(void* context) {
     return scene_manager_handle_back_event(subghz->scene_manager);
 }
 
+void subghz_ext_radio_notice(SubGhz* subghz) {
+    furi_assert(subghz);
+    if(subghz->ext_radio_announced) return;
+    if(subghz_txrx_radio_device_get(subghz->txrx) != SubGhzRadioDeviceTypeExternalCC1101) return;
+    subghz->ext_radio_announced = true;
+    scene_manager_next_scene(subghz->scene_manager, SubGhzSceneRadioConnected);
+}
+
+static void subghz_phone_gps_on_tick(SubGhz* subghz) {
+    if(!subghz->gps || !subghz->last_settings || !subghz->last_settings->gps_companion) return;
+
+    subghz_gps_rx_session_note_fix(subghz->gps);
+    if(!subghz_gps_poll_companion_link(subghz->gps)) return;
+
+    subghz_gps_companion_disconnected(subghz->gps);
+    subghz->last_settings->gps_companion = false;
+    subghz_last_settings_save(subghz->last_settings);
+
+    if(scene_manager_get_current_scene(subghz->scene_manager) == SubGhzSceneReceiverConfig) {
+        view_dispatcher_send_custom_event(
+            subghz->view_dispatcher, SubGhzCustomEventSceneSettingReload);
+    }
+}
+
 void subghz_tick_event_callback(void* context) {
     furi_assert(context);
     SubGhz* subghz = context;
+    subghz_phone_gps_on_tick(subghz);
     scene_manager_handle_tick_event(subghz->scene_manager);
 }
 
@@ -95,6 +121,10 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
 
     subghz->file_path = furi_string_alloc();
     subghz->file_path_tmp = furi_string_alloc();
+    subghz->receiver_tune_debounce = 0;
+    subghz->receiver_tune_needs_preset_reload = false;
+    subghz->receiver_settings_dirty = false;
+    subghz->ext_radio_announced = false;
 
     // GUI
     subghz->gui = furi_record_open(RECORD_GUI);
@@ -150,6 +180,12 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
             SubGhzViewIdByteInput,
             byte_input_get_view(subghz->byte_input));
 
+        subghz->number_input = number_input_alloc();
+        view_dispatcher_add_view(
+            subghz->view_dispatcher,
+            SubGhzViewIdNumberInput,
+            number_input_get_view(subghz->number_input));
+
         // Custom Widget
         subghz->widget = widget_alloc();
         view_dispatcher_add_view(
@@ -185,28 +221,34 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
     //init TxRx & Protocol & History & KeyBoard
     subghz_unlock(subghz);
 
-    //SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
-
-    //subghz_load_custom_presets(setting);
-
     // Load last used values for Read, Read RAW, etc. or default
     subghz->last_settings = subghz_last_settings_alloc();
-    //size_t preset_count = subghz_setting_get_preset_count(setting);
-    subghz_last_settings_load(subghz->last_settings, 0);
+    SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
+    subghz_last_settings_load(subghz->last_settings, subghz_setting_get_preset_count(setting));
 
     // Set LED and Amp GPIO control state
     furi_hal_subghz_set_ext_leds_and_amp(subghz->last_settings->leds_and_amp);
 
     if(!alloc_for_tx_only) {
+        subghz->tx_power = subghz->last_settings->tx_power;
+        subghz->last_settings->frequency =
+            subghz_txrx_frequency_make_valid(subghz->txrx, subghz->last_settings->frequency);
         subghz_txrx_set_preset_internal(
             subghz->txrx,
             subghz->last_settings->frequency,
             subghz->last_settings->preset_index,
             subghz->tx_power);
         subghz->history = subghz_history_alloc();
+        subghz->gps = subghz_gps_alloc();
+        subghz_gps_set_companion_enabled(subghz->gps, subghz->last_settings->gps_companion);
+    } else {
+        subghz->gps = NULL;
     }
 
     subghz_rx_key_state_set(subghz, SubGhzRxKeyStateIDLE);
+
+    subghz->rx_presented = 0;
+    subghz->rx_autosaved = 0;
 
     subghz->gen_info = malloc(sizeof(GenInfo));
 
@@ -243,12 +285,9 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
 void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
     furi_assert(subghz);
 
-    // Its scene drops it on exit, but a kill signals the event loop directly and runs no scene
-    // handler, leaving a registered view that view_dispatcher_free furi_checks on. Must stay
-    // above the view dispatcher, last settings and notification teardown - the plugin uses them.
     subghz_frequency_analyzer_plugin_unload(subghz);
-    // Ditto for Add Manually, which has a byte_input header to take back.
-    subghz_add_manually_plugin_unload(subghz);
+    subghz_scene_plugin_release(subghz, &subghz->add_manually_plugin);
+    subghz_scene_plugin_release(subghz, &subghz->clean_dupes_plugin);
 
     if(subghz->rpc_ctx) {
         rpc_system_app_set_callback(subghz->rpc_ctx, NULL, NULL);
@@ -273,6 +312,9 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         // ByteInput
         view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdByteInput);
         byte_input_free(subghz->byte_input);
+
+        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdNumberInput);
+        number_input_free(subghz->number_input);
 
         // Custom Widget
         view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdWidget);
@@ -311,6 +353,12 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
     furi_record_close(RECORD_GUI);
     subghz->gui = NULL;
 
+    // GPS: stop worker, release UART and restore the expansion service
+    if(subghz->gps) {
+        subghz_gps_free(subghz->gps);
+        subghz->gps = NULL;
+    }
+
     subghz_last_settings_free(subghz->last_settings);
 
     // threshold rssi
@@ -341,8 +389,29 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
 }
 
 int32_t subghz_app(void* p) {
+    const char* args = (const char*)p;
+    bool start_analyzer = (args != NULL) && (strcmp(args, "analyzer") == 0);
+
+    uint32_t start_rx_frequency = 0;
+    bool start_receiver = (args != NULL) && (sscanf(args, "rx %lu", &start_rx_frequency) == 1) &&
+                          (start_rx_frequency > 0);
+
+    uint32_t start_raw_frequency = 0;
+    uint32_t start_raw_preset = UINT32_MAX;
+    int raw_fields = 0;
+    if(args != NULL) {
+        unsigned long raw_freq = 0;
+        unsigned long raw_preset = 0;
+        raw_fields = sscanf(args, "readraw %lu %lu", &raw_freq, &raw_preset);
+        if(raw_fields >= 1 && raw_freq > 0) {
+            start_raw_frequency = (uint32_t)raw_freq;
+            if(raw_fields >= 2) start_raw_preset = (uint32_t)raw_preset;
+        }
+    }
+    const bool start_read_raw = start_raw_frequency > 0;
+
     bool alloc_for_tx;
-    if(p && strlen(p)) {
+    if(args && strlen(args) && !start_analyzer && !start_receiver && !start_read_raw) {
         alloc_for_tx = true;
     } else {
         alloc_for_tx = false;
@@ -357,7 +426,46 @@ int32_t subghz_app(void* p) {
     }
 
     // Check argument and run corresponding scene
-    if(p && strlen(p)) {
+    if(start_analyzer) {
+        view_dispatcher_attach_to_gui(
+            subghz->view_dispatcher, subghz->gui, ViewDispatcherTypeFullscreen);
+        furi_string_set(subghz->file_path, SUBGHZ_APP_FOLDER);
+        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneStart);
+        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneFrequencyAnalyzer);
+        subghz_ext_radio_notice(subghz);
+    } else if(start_receiver) {
+        view_dispatcher_attach_to_gui(
+            subghz->view_dispatcher, subghz->gui, ViewDispatcherTypeFullscreen);
+        furi_string_set(subghz->file_path, SUBGHZ_APP_FOLDER);
+        subghz->last_settings->frequency = start_rx_frequency;
+        subghz->last_settings->enable_hopping = false;
+        subghz_txrx_set_preset_internal(
+            subghz->txrx,
+            start_rx_frequency,
+            subghz->last_settings->preset_index,
+            subghz->tx_power);
+        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneStart);
+        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReceiver);
+        subghz_ext_radio_notice(subghz);
+    } else if(start_read_raw) {
+        view_dispatcher_attach_to_gui(
+            subghz->view_dispatcher, subghz->gui, ViewDispatcherTypeFullscreen);
+        furi_string_set(subghz->file_path, SUBGHZ_APP_FOLDER);
+        subghz->last_settings->frequency = start_raw_frequency;
+        subghz->last_settings->enable_hopping = false;
+        if(start_raw_preset != UINT32_MAX) {
+            subghz->last_settings->preset_index = start_raw_preset;
+        }
+        subghz_txrx_set_preset_internal(
+            subghz->txrx,
+            start_raw_frequency,
+            subghz->last_settings->preset_index,
+            subghz->tx_power);
+        subghz_rx_key_state_set(subghz, SubGhzRxKeyStateIDLE);
+        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneStart);
+        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReadRAW);
+        subghz_ext_radio_notice(subghz);
+    } else if(p && strlen(p)) {
         uint32_t rpc_ctx = 0;
 
         if(sscanf(p, "RPC %lX", &rpc_ctx) == 1) {
@@ -381,6 +489,7 @@ int32_t subghz_app(void* p) {
                     //Load transmitter TX
                     scene_manager_next_scene(subghz->scene_manager, SubGhzSceneTransmitter);
                 }
+                subghz_ext_radio_notice(subghz);
             } else {
                 //exit app
                 scene_manager_stop(subghz->scene_manager);
@@ -393,6 +502,7 @@ int32_t subghz_app(void* p) {
         furi_string_set(subghz->file_path, SUBGHZ_APP_FOLDER);
         if(subghz_txrx_is_database_loaded(subghz->txrx)) {
             scene_manager_next_scene(subghz->scene_manager, SubGhzSceneStart);
+            subghz_ext_radio_notice(subghz);
         } else {
             scene_manager_set_scene_state(
                 subghz->scene_manager, SubGhzSceneShowError, SubGhzCustomEventManagerSet);

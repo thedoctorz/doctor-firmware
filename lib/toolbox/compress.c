@@ -73,15 +73,17 @@ void compress_icon_decode(CompressIcon* instance, const uint8_t* icon_data, uint
     CompressHeader* header = (CompressHeader*)icon_data;
     if(header->is_compressed) {
         size_t decoded_size = 0;
-        /* If decompression fails - check that decode_buf_size is large enough */
-        furi_check(compress_decode_internal(
-            instance->decoder,
-            icon_data,
-            /* Decoder will check/process headers again - need to pass them */
-            sizeof(CompressHeader) + header->compressed_buff_size,
-            instance->buffer,
-            instance->buffer_size,
-            &decoded_size));
+        bool decoded = header->compressed_buff_size > 0 &&
+                       compress_decode_internal(
+                           instance->decoder,
+                           icon_data,
+                           sizeof(CompressHeader) + header->compressed_buff_size,
+                           instance->buffer,
+                           instance->buffer_size,
+                           &decoded_size);
+        if(!decoded) {
+            memset(instance->buffer, 0, instance->buffer_size);
+        }
         *output = instance->buffer;
     } else {
         *output = (uint8_t*)&icon_data[1];

@@ -13,6 +13,7 @@
 #include "scenes/desktop_scene_locked.h"
 
 #include "furi_hal_power.h"
+#include <furi_hal_usb.h>
 
 #define TAG "Desktop"
 
@@ -20,6 +21,41 @@ static void desktop_auto_lock_arm(Desktop*);
 static void desktop_auto_lock_inhibit(Desktop*);
 static void desktop_start_auto_lock_timer(Desktop*);
 static void desktop_apply_settings(Desktop*);
+
+// Runs in USB interrupt context: only touch the plain connection flag here, all
+// real work (and the prompt itself) happens later in the tick, on the desktop thread.
+static void desktop_usb_state_callback(FuriHalUsbStateEvent state, void* context) {
+    Desktop* desktop = context;
+    switch(state) {
+    case FuriHalUsbStateEventReset:
+    case FuriHalUsbStateEventWakeup:
+        desktop->usb_host_connected = true;
+        break;
+    case FuriHalUsbStateEventSuspend:
+        desktop->usb_host_connected = false;
+        break;
+    default:
+        break;
+    }
+}
+
+// Offer USB mass storage once per connection, but only from the idle desktop so
+// nothing is using the SD card when the app takes it over. A dumb charger never
+// enumerates, so usb_host_connected stays false and no prompt is shown.
+static void desktop_check_usb_mass_storage(Desktop* desktop) {
+    if(desktop->usb_host_connected) {
+        if(!desktop->usb_msc_prompt_shown && !desktop->app_running && !desktop->locked) {
+            desktop->usb_msc_prompt_shown = true;
+            view_dispatcher_send_custom_event(
+                desktop->view_dispatcher, DesktopGlobalUsbMountPrompt);
+        }
+    } else if(desktop->usb_msc_prompt_shown) {
+        // Unplugged: re-arm for next connection and close the prompt if it is up.
+        desktop->usb_msc_prompt_shown = false;
+        view_dispatcher_send_custom_event(
+            desktop->view_dispatcher, DesktopUsbMountEventDisconnected);
+    }
+}
 
 static void desktop_loader_callback(const void* message, void* context) {
     furi_assert(context);
@@ -48,12 +84,6 @@ static void desktop_lock_icon_draw_callback(Canvas* canvas, void* context) {
     UNUSED(context);
     furi_assert(canvas);
     canvas_draw_icon(canvas, 0, 0, &I_Lock_7x8);
-}
-
-static void desktop_dummy_mode_icon_draw_callback(Canvas* canvas, void* context) {
-    UNUSED(context);
-    furi_assert(canvas);
-    canvas_draw_icon(canvas, 0, 0, &I_GameMode_11x8);
 }
 
 static void desktop_clock_update(Desktop* desktop) {
@@ -161,6 +191,11 @@ static bool desktop_custom_event_callback(void* context, uint32_t event) {
         desktop_settings_load(&desktop->settings);
         desktop_apply_settings(desktop);
 
+    } else if(event == DesktopGlobalUsbMountPrompt) {
+        if(!desktop->app_running && !desktop->locked) {
+            scene_manager_next_scene(desktop->scene_manager, DesktopSceneUsbMount);
+        }
+
     } else {
         return scene_manager_handle_custom_event(desktop->scene_manager, event);
     }
@@ -177,6 +212,7 @@ static bool desktop_back_event_callback(void* context) {
 static void desktop_tick_event_callback(void* context) {
     furi_assert(context);
     Desktop* app = context;
+    desktop_check_usb_mass_storage(app);
     scene_manager_handle_tick_event(app->scene_manager);
 }
 
@@ -241,11 +277,6 @@ static void desktop_apply_settings(Desktop* desktop) {
 
     desktop_clock_reconfigure(desktop);
 
-    view_port_enabled_set(desktop->dummy_mode_icon_viewport, desktop->settings.dummy_mode);
-    desktop_main_set_dummy_mode_state(desktop->main_view, desktop->settings.dummy_mode);
-    animation_manager_set_dummy_mode_state(
-        desktop->animation_manager, desktop->settings.dummy_mode);
-
     loader_set_menu_style(desktop->loader, desktop->settings.menu_style);
 
     if(!desktop->app_running && !desktop->locked) {
@@ -289,9 +320,9 @@ static Desktop* desktop_alloc(void) {
         desktop->view_dispatcher, desktop_back_event_callback);
 
     desktop->lock_menu = desktop_lock_menu_alloc();
-    desktop->quick_settings = desktop_quick_settings_alloc();
     desktop->debug_view = desktop_debug_alloc();
     desktop->popup = popup_alloc();
+    desktop->usb_mount_dialog = dialog_ex_alloc();
     desktop->locked_view = desktop_view_locked_alloc();
     desktop->pin_input_view = desktop_view_pin_input_alloc();
     desktop->pin_timeout_view = desktop_view_pin_timeout_alloc();
@@ -325,10 +356,6 @@ static Desktop* desktop_alloc(void) {
         DesktopViewIdLockMenu,
         desktop_lock_menu_get_view(desktop->lock_menu));
     view_dispatcher_add_view(
-        desktop->view_dispatcher,
-        DesktopViewIdQuickSettings,
-        desktop_quick_settings_get_view(desktop->quick_settings));
-    view_dispatcher_add_view(
         desktop->view_dispatcher, DesktopViewIdDebug, desktop_debug_get_view(desktop->debug_view));
     view_dispatcher_add_view(
         desktop->view_dispatcher, DesktopViewIdPopup, popup_get_view(desktop->popup));
@@ -344,6 +371,10 @@ static Desktop* desktop_alloc(void) {
         desktop->view_dispatcher,
         DesktopViewIdSlideshow,
         desktop_view_slideshow_get_view(desktop->slideshow_view));
+    view_dispatcher_add_view(
+        desktop->view_dispatcher,
+        DesktopViewIdUsbMount,
+        dialog_ex_get_view(desktop->usb_mount_dialog));
 
     // Lock icon
     desktop->lock_icon_viewport = view_port_alloc();
@@ -352,14 +383,6 @@ static Desktop* desktop_alloc(void) {
         desktop->lock_icon_viewport, desktop_lock_icon_draw_callback, desktop);
     view_port_enabled_set(desktop->lock_icon_viewport, false);
     gui_add_view_port(desktop->gui, desktop->lock_icon_viewport, GuiLayerStatusBarLeft);
-
-    // Dummy mode icon
-    desktop->dummy_mode_icon_viewport = view_port_alloc();
-    view_port_set_width(desktop->dummy_mode_icon_viewport, icon_get_width(&I_GameMode_11x8));
-    view_port_draw_callback_set(
-        desktop->dummy_mode_icon_viewport, desktop_dummy_mode_icon_draw_callback, desktop);
-    view_port_enabled_set(desktop->dummy_mode_icon_viewport, false);
-    gui_add_view_port(desktop->gui, desktop->dummy_mode_icon_viewport, GuiLayerStatusBarLeft);
 
     // Clock
     desktop->clock_viewport = view_port_alloc();
@@ -397,6 +420,10 @@ static Desktop* desktop_alloc(void) {
         furi_timer_alloc(desktop_clock_timer_callback, FuriTimerTypePeriodic, desktop);
 
     desktop->app_running = loader_is_locked(desktop->loader);
+
+    desktop->usb_host_connected = false;
+    desktop->usb_msc_prompt_shown = false;
+    furi_hal_usb_set_state_callback(desktop_usb_state_callback, desktop);
 
     furi_record_create(RECORD_DESKTOP, desktop);
 
@@ -452,19 +479,6 @@ void desktop_unlock(Desktop* desktop) {
     furi_pubsub_publish(desktop->status_pubsub, &status);
 
     desktop->locked = false;
-}
-
-void desktop_set_dummy_mode_state(Desktop* desktop, bool enabled) {
-    desktop->in_transition = true;
-
-    view_port_enabled_set(desktop->dummy_mode_icon_viewport, enabled);
-    desktop_main_set_dummy_mode_state(desktop->main_view, enabled);
-    animation_manager_set_dummy_mode_state(desktop->animation_manager, enabled);
-    desktop->settings.dummy_mode = enabled;
-
-    desktop->in_transition = false;
-
-    desktop_settings_save(&desktop->settings);
 }
 
 void desktop_set_stealth_mode_state(Desktop* desktop, bool enabled) {

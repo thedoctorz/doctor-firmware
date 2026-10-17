@@ -1,25 +1,5 @@
 # Structure
 
-## debug 
-
-Applications for factory testing the Flipper.
-
-- `accessor`            - Wiegand server 
-- `battery_test_app`    - Battery debug app
-- `blink_test`          - LED blinker   
-- `bt_debug_app`        - BT test app. Requires full BT stack installed
-- `display_test`        - Various display tests & tweaks
-- `file_browser_test`   - Test UI for file picker
-- `keypad_test`         - Keypad test
-- `lfrfid_debug`        - LF RFID debug tool
-- `text_box_test`       - UI tests
-- `uart_echo`           - UART mode test 
-- `unit_tests`          - Unit tests
-- `usb_mouse`           - USB HID test
-- `usb_test`            - Other USB tests
-- `vibro_test`          - Vibro test
-
-
 ## main
 
 Applications for main Flipper menu.

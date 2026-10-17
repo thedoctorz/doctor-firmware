@@ -159,6 +159,8 @@ static inline void
  */
 typedef void (*GpsLocationCallback)(GpsStatus status, const GpsLocation* location, void* context);
 
+bool gps_is_available(Gps* gps);
+
 /** Request location stream from companion device
  *
  * @param      gps        Gps instance

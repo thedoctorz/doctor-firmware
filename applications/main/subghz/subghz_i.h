@@ -18,11 +18,12 @@
 #include <gui/modules/popup.h>
 #include <gui/modules/text_input.h>
 #include <gui/modules/byte_input.h>
+#include <gui/modules/number_input.h>
 #include <gui/modules/widget.h>
 
 #include <subghz/scenes/subghz_scene.h>
 #include <lib/subghz/subghz_worker.h>
-#include <lib/subghz/subghz_file_encoder_worker.h>
+#include <lib/subghz/subghz_raw_file_reader.h>
 #include <lib/subghz/subghz_setting.h>
 #include <lib/subghz/receiver.h>
 #include <lib/subghz/transmitter.h>
@@ -38,11 +39,13 @@
 #include "helpers/subghz_threshold_rssi.h"
 
 #include "helpers/subghz_txrx.h"
-#include "helpers/subghz_add_manually_plugin.h"
 #include "helpers/subghz_frequency_analyzer_plugin.h"
+#include "helpers/subghz_scene_plugin.h"
 
 #include <flipper_application/plugins/composite_resolver.h>
 #include <flipper_application/plugins/plugin_manager.h>
+
+#include "helpers/subghz_gps.h"
 
 #define SUBGHZ_MAX_LEN_NAME      64
 #define SUBGHZ_EXT_PRESET_NAME   true
@@ -62,6 +65,7 @@ struct SubGhz {
     Popup* popup;
     TextInput* text_input;
     ByteInput* byte_input;
+    NumberInput* number_input;
     Widget* widget;
     DialogsApp* dialogs;
     FuriString* file_path;
@@ -75,6 +79,7 @@ struct SubGhz {
 
     SubGhzReadRAW* subghz_read_raw;
     bool raw_send_only;
+    bool raw_auto_locked;
 
     bool save_datetime_set;
     DateTime save_datetime;
@@ -88,26 +93,41 @@ struct SubGhz {
 
     GenInfo* gen_info;
 
-    SubGhzFileEncoderWorker* decode_raw_file_worker_encoder;
+    SubGhzRawFileReader* decode_raw_reader;
 
     SubGhzThresholdRssi* threshold_rssi;
     SubGhzRxKeyState rx_key_state;
     SubGhzHistory* history;
 
-    // Feature plugins, mapped on demand: the analyzer while its scene is current, Add Manually
-    // until the start scene is reached again. The resolver they share is refcounted rather than
-    // owned by whichever loaded first.
     CompositeApiResolver* api_resolver;
     uint8_t api_resolver_refs;
     PluginManager* freq_analyzer_plugin_manager;
     const SubGhzFrequencyAnalyzerPlugin* freq_analyzer_plugin;
-    PluginManager* add_manually_plugin_manager;
-    const SubGhzAddManuallyPlugin* add_manually_plugin;
 
     uint16_t idx_menu_chosen;
     SubGhzLoadTypeFile load_type_file;
     uint8_t tx_power;
     void* rpc_ctx;
+
+    SubGhzGps* gps;
+
+    uint16_t settings_user_idx;
+    uint8_t settings_user_static_index;
+    uint8_t settings_user_hopper_index;
+    char settings_user_text[16];
+
+    uint8_t receiver_tune_debounce;
+    bool receiver_tune_needs_preset_reload;
+    bool receiver_settings_dirty;
+
+    uint16_t rx_presented;
+
+    uint16_t rx_autosaved;
+
+    bool ext_radio_announced;
+
+    SubGhzScenePlugin add_manually_plugin;
+    SubGhzScenePlugin clean_dupes_plugin;
 };
 
 #ifdef __cplusplus
@@ -117,8 +137,11 @@ extern "C" {
 void subghz_blink_start(SubGhz* subghz);
 void subghz_blink_stop(SubGhz* subghz);
 
+void subghz_ext_radio_notice(SubGhz* subghz);
+
 bool subghz_tx_start(SubGhz* subghz, FlipperFormat* flipper_format);
 void subghz_dialog_message_freq_error(SubGhz* subghz, bool only_rx);
+void subghz_dialog_message_no_ext_module(SubGhz* subghz);
 
 bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog);
 bool subghz_get_next_name_file(SubGhz* subghz, uint8_t max_len);
@@ -126,14 +149,20 @@ bool subghz_save_protocol_to_file(
     SubGhz* subghz,
     FlipperFormat* flipper_format,
     const char* dev_file_name);
+bool subghz_save_raw_from_key(SubGhz* subghz, const char* file_path);
 void subghz_save_to_file(void* context);
 bool subghz_load_protocol_from_file(SubGhz* subghz);
 bool subghz_rename_file(SubGhz* subghz);
 bool subghz_file_available(SubGhz* subghz);
 bool subghz_delete_file(SubGhz* subghz);
 void subghz_file_name_clear(SubGhz* subghz);
+bool subghz_restore_raw_file_path(SubGhz* subghz);
 bool subghz_path_is_file(FuriString* path);
 SubGhzLoadTypeFile subghz_get_load_type_file(SubGhz* subghz);
+
+FlipperFormat* subghz_get_current_signal_data(SubGhz* subghz);
+
+bool subghz_current_signal_is_from_file(SubGhz* subghz);
 
 void subghz_lock(SubGhz* subghz);
 void subghz_unlock(SubGhz* subghz);

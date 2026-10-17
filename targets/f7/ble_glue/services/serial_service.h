@@ -18,6 +18,7 @@ typedef enum {
     SerialServiceEventTypeDataReceived,
     SerialServiceEventTypeDataSent,
     SerialServiceEventTypesBleResetRequest,
+    SerialServiceEventTypeQueryAvailable,
 } SerialServiceEventType;
 
 typedef struct {

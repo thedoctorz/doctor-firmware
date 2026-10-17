@@ -51,6 +51,18 @@ SubGhzProtocolStatus
  */
 LevelDuration subghz_transmitter_yield(void* context);
 
+/**
+ * Get encoded upload buffer after deserialize.
+ * @param instance Pointer to a SubGhzTransmitter instance
+ * @param upload Pointer to upload buffer
+ * @param size Upload buffer size
+ * @return true On success
+ */
+bool subghz_transmitter_get_upload(
+    SubGhzTransmitter* instance,
+    const LevelDuration** upload,
+    size_t* size);
+
 #ifdef __cplusplus
 }
 #endif

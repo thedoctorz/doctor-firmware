@@ -8,6 +8,8 @@
 #include <furi.h>
 #include <ble/core/ble_defs.h>
 
+void ble_svc_serial_notify_credits(BleServiceSerial* serial_svc, uint32_t available);
+
 typedef struct {
     FuriHalBleProfileBase base;
 
@@ -41,11 +43,10 @@ static void ble_profile_serial_stop(FuriHalBleProfileBase* profile) {
     ble_svc_serial_stop(serial_profile->serial_svc);
 }
 
-// AN5289: 4.7, in order to use flash controller interval must be at least 25ms + advertisement, which is 30 ms
-// Since we don't use flash controller anymore interval can be lowered to 7.5ms
-#define CONNECTION_INTERVAL_MIN (0x06)
-// Up to 45 ms
-#define CONNECTION_INTERVAL_MAX (0x24)
+/* Request 7.5-15 ms. iOS may still settle on 15 ms; HID already uses 7.5. */
+#define CONNECTION_INTERVAL_MIN       (0x06) /* 7.5 ms */
+#define CONNECTION_INTERVAL_MAX       (0x0C) /* 15 ms */
+#define CONNECTION_SUPERVISOR_TIMEOUT (500) /* 5 s, units of 10 ms */
 
 static const GapConfig serial_template_config = {
     .adv_service =
@@ -60,7 +61,7 @@ static const GapConfig serial_template_config = {
         .conn_int_min = CONNECTION_INTERVAL_MIN,
         .conn_int_max = CONNECTION_INTERVAL_MAX,
         .slave_latency = 0,
-        .supervisor_timeout = 0,
+        .supervisor_timeout = CONNECTION_SUPERVISOR_TIMEOUT,
     }};
 
 static void
@@ -104,6 +105,13 @@ void ble_profile_serial_notify_buffer_is_empty(FuriHalBleProfileBase* profile) {
 
     BleProfileSerial* serial_profile = (BleProfileSerial*)profile;
     ble_svc_serial_notify_buffer_is_empty(serial_profile->serial_svc);
+}
+
+void ble_profile_serial_notify_credits(FuriHalBleProfileBase* profile, uint32_t credits) {
+    furi_check(profile && (profile->config == ble_profile_serial));
+
+    BleProfileSerial* serial_profile = (BleProfileSerial*)profile;
+    ble_svc_serial_notify_credits(serial_profile->serial_svc, credits);
 }
 
 void ble_profile_serial_set_rpc_active(FuriHalBleProfileBase* profile, bool active) {

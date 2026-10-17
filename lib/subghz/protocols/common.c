@@ -150,7 +150,6 @@ SubGhzProtocolStatus subghz_protocol_encoder_common_deserialize(
     if(ret != SubGhzProtocolStatusOk) {
         return ret;
     }
-    // Optional value
     flipper_format_read_uint32(
         flipper_format, "Repeat", (uint32_t*)&instance->common.encoder.repeat, 1);
 

@@ -6,6 +6,7 @@
 #include <furi_hal.h>
 #include <lib/flipper_format/flipper_format.h>
 #include <lib/subghz/types.h>
+#include "helpers/subghz_types.h"
 
 typedef struct SubGhzHistory SubGhzHistory;
 
@@ -62,6 +63,10 @@ uint16_t subghz_history_get_item(SubGhzHistory* instance);
  */
 uint8_t subghz_history_get_type_protocol(SubGhzHistory* instance, uint16_t idx);
 
+const SubGhzProtocol* subghz_history_get_protocol(SubGhzHistory* instance, uint16_t idx);
+
+SubGhzHistoryButtonIcon subghz_history_get_button_icon(SubGhzHistory* instance, uint16_t idx);
+
 /** Get name protocol to history[idx]
  * 
  * @param instance  - SubGhzHistory instance
@@ -109,25 +114,55 @@ bool subghz_history_get_text_space_left(SubGhzHistory* instance, FuriString* out
  */
 uint16_t subghz_history_get_last_index(SubGhzHistory* instance);
 
+/** Set the GPS location tagged
+ *
+ * When valid, the coordinates are written as "Lat"/"Lon" keys into each new
+ * item so that saving the signal geotags the resulting .sub file.
+ *
+ * @param instance   - SubGhzHistory instance
+ * @param valid      - whether a usable fix is available
+ * @param latitude   - latitude in decimal degrees
+ * @param longitude  - longitude in decimal degrees
+ */
+void subghz_history_set_location(
+    SubGhzHistory* instance,
+    bool valid,
+    float latitude,
+    float longitude);
+
 /** Add protocol to history
- * 
- * Repeats of the same signal are dropped while they keep arriving within a short
- * window of each other. The window is measured with air_time so that it covers
- * the air between the two frames, not the wall time between the moments the app
- * was told about them - decoding can be suspended (a scene is pushed on top of
- * it, RX is restarted, ...) and a frame can be reported long after it was sent.
  *
  * @param instance  - SubGhzHistory instance
  * @param context    - SubGhzProtocolCommon context
  * @param preset    - SubGhzRadioPreset preset
- * @param air_time  - air decoded so far, ms, see subghz_txrx_get_air_time_ms()
  * @return bool;
  */
 bool subghz_history_add_to_history(
     SubGhzHistory* instance,
     void* context,
+    SubGhzRadioPreset* preset);
+
+/** Add protocol to history tagging the radio source (dual RX)
+ *
+ * @param instance - SubGhzHistory instance
+ * @param context  - SubGhzProtocolCommon context
+ * @param preset   - SubGhzRadioPreset preset
+ * @param source   - radio source marker (0 = internal, 1 = external)
+ * @return bool;
+ */
+bool subghz_history_add_to_history_source(
+    SubGhzHistory* instance,
+    void* context,
     SubGhzRadioPreset* preset,
-    uint32_t air_time);
+    uint8_t source);
+
+/** Get the radio source marker of history[idx] (0 = internal, 1 = external)
+ *
+ * @param instance - SubGhzHistory instance
+ * @param idx      - record index
+ * @return uint8_t source marker
+ */
+uint8_t subghz_history_get_source(SubGhzHistory* instance, uint16_t idx);
 
 /** Get SubGhzProtocolCommonLoad to load into the protocol decoder bin data
  * 

@@ -87,7 +87,7 @@ void* subghz_protocol_encoder_doitrand_alloc(SubGhzEnvironment* environment) {
 /**
  * Generating an upload from data.
  * @param instance Pointer to a SubGhzProtocolEncoderDoitrand instance
- * @return true Always; this encoder has no failure path
+ * @return true On success
  */
 static bool subghz_protocol_encoder_doitrand_get_upload(void* context) {
     SubGhzProtocolEncoderDoitrand* instance = context;

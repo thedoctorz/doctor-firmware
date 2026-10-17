@@ -74,6 +74,7 @@ def GatherSources(env, sources_list, node="."):
             for source_type in include_sources
         )
     )
+    gathered_sources = list(dict.fromkeys(gathered_sources))
     ## Debug
     # print(
     #     f"Gathered sources for {sources_list} from {node}: {list(f.path for f in gathered_sources)}"

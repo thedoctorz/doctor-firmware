@@ -38,7 +38,6 @@ uint8_t bit_lib_get_bits(const uint8_t* data, size_t position, uint8_t length) {
     if(shift == 0) {
         return data[position / 8] >> (8 - length);
     } else if(shift + length <= 8) {
-        // Requested bits fit in the current byte, don't read the next one
         return (uint8_t)(data[position / 8] << shift) >> (8 - length);
     } else {
         uint8_t value = (data[position / 8] << (shift));

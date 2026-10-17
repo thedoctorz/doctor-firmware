@@ -22,6 +22,16 @@ typedef void (*SubGhzReceiverCallback)(
 SubGhzReceiver* subghz_receiver_alloc_init(SubGhzEnvironment* environment);
 
 /**
+ * Allocate and init SubGhzReceiver, skipping any protocol whose flag matches
+ * @p exclude_flags. 
+ * @param environment Pointer to a SubGhzEnvironment instance
+ * @param exclude_flags Protocols matching any of these flags are not allocated
+ * @return SubGhzReceiver* pointer to a SubGhzReceiver instance
+ */
+SubGhzReceiver*
+    subghz_receiver_alloc_init_ex(SubGhzEnvironment* environment, SubGhzProtocolFlag exclude_flags);
+
+/**
  * Free SubGhzReceiver.
  * @param instance Pointer to a SubGhzReceiver instance
  */
@@ -58,6 +68,12 @@ void subghz_receiver_set_rx_callback(
  * @param filter Filter, SubGhzProtocolFlag
  */
 void subghz_receiver_set_filter(SubGhzReceiver* instance, SubGhzProtocolFlag filter);
+
+void subghz_receiver_set_modulation(SubGhzReceiver* instance, SubGhzProtocolFlag modulation);
+
+void subghz_receiver_set_band(SubGhzReceiver* instance, SubGhzProtocolFlag band);
+
+void subghz_receiver_set_gate(SubGhzReceiver* instance, SubGhzProtocolFlag gate);
 
 /**
  * Search for a cattery by his name.

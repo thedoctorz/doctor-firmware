@@ -74,7 +74,30 @@ class Main(App):
                 f"{os.path.basename(self.args.binname):<11}: {pages:>4} flash pages (last page {last_page_state:.02f}% full)"
             )
         )
-        return 0
+        return self.check_copro_overlap(binsize)
+
+    def check_copro_overlap(self, binsize):
+        FIRMWARE_ORIGIN = 0x08000000
+        COPRO_BASE = int(os.environ.get("FBT_COPRO_BASE", "0x080D7000"), 0)
+        limit = COPRO_BASE - FIRMWARE_ORIGIN
+
+        if binsize <= limit:
+            print(
+                f"{'':<11}  {limit - binsize:>8} bytes free below BLE stack @ {COPRO_BASE:#010x}"
+            )
+            return 0
+
+        overflow = binsize - limit
+        print(
+            fg.red(
+                f"ERROR: firmware overruns the BLE coprocessor stack by {overflow} bytes.\n"
+                f"       image {binsize} > limit {limit} (stack @ {COPRO_BASE:#010x}).\n"
+                f"       Flashing this would corrupt the radio stack.\n"
+                f"       Set FBT_COPRO_BASE for a different stack, or "
+                f"FBT_ALLOW_COPRO_OVERLAP=1 to build anyway."
+            )
+        )
+        return 0 if os.environ.get("FBT_ALLOW_COPRO_OVERLAP") == "1" else 1
 
     def _get_default_copro_bin(self):
         sys.path.insert(0, str(FBT_ROOT_DIR))

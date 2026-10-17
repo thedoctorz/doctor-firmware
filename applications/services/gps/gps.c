@@ -4,6 +4,7 @@
 
 struct Gps {
     FuriMutex* mutex;
+    FuriMutex* callback_mutex;
 
     GpsRpcSend rpc_send;
     void* rpc_send_context;
@@ -15,6 +16,7 @@ struct Gps {
 static Gps* gps_alloc(void) {
     Gps* gps = malloc(sizeof(Gps));
     gps->mutex = furi_mutex_alloc(FuriMutexTypeNormal);
+    gps->callback_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     gps->rpc_send = NULL;
     gps->rpc_send_context = NULL;
     gps->location_callback = NULL;
@@ -58,10 +60,20 @@ bool gps_report_location(Gps* gps, const GpsLocation* location) {
 
 void gps_set_location_callback(Gps* gps, GpsLocationCallback callback, void* context) {
     furi_check(gps);
+    furi_mutex_acquire(gps->callback_mutex, FuriWaitForever);
     furi_mutex_acquire(gps->mutex, FuriWaitForever);
     gps->location_callback = callback;
     gps->location_context = context;
     furi_mutex_release(gps->mutex);
+    furi_mutex_release(gps->callback_mutex);
+}
+
+bool gps_is_available(Gps* gps) {
+    furi_check(gps);
+    furi_mutex_acquire(gps->mutex, FuriWaitForever);
+    bool available = gps->rpc_send != NULL;
+    furi_mutex_release(gps->mutex);
+    return available;
 }
 
 void gps_set_rpc_bridge(Gps* gps, GpsRpcSend send, void* context) {
@@ -74,6 +86,7 @@ void gps_set_rpc_bridge(Gps* gps, GpsRpcSend send, void* context) {
 
 void gps_on_location(Gps* gps, GpsStatus status, const GpsLocation* location) {
     furi_check(gps);
+    furi_mutex_acquire(gps->callback_mutex, FuriWaitForever);
     furi_mutex_acquire(gps->mutex, FuriWaitForever);
     GpsLocationCallback callback = gps->location_callback;
     void* context = gps->location_context;
@@ -81,6 +94,7 @@ void gps_on_location(Gps* gps, GpsStatus status, const GpsLocation* location) {
     if(callback) {
         callback(status, location, context);
     }
+    furi_mutex_release(gps->callback_mutex);
 }
 
 void gps_on_system_start(void* p) {

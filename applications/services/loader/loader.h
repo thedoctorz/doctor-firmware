@@ -7,6 +7,7 @@ extern "C" {
 
 #define RECORD_LOADER            "loader"
 #define LOADER_APPLICATIONS_NAME "Apps"
+#define LOADER_APPS_MENU_PATH    "/ext/apps/Tools/apps_menu.fap"
 /**
  * @brief Where menu style plugins live
  *
@@ -22,6 +23,7 @@ extern "C" {
 #define LOADER_MENU_STYLE_PREFIX "menu_style_"
 
 typedef struct Loader Loader;
+typedef struct MenuStyle MenuStyle;
 
 typedef enum {
     LoaderStatusOk,
@@ -103,14 +105,14 @@ bool loader_is_locked(Loader* instance);
 void loader_show_menu(Loader* instance);
 
 /**
- * @brief Set the main menu style
+ * @brief Show loader settings menu
  * @param[in] instance loader instance
- * @param[in] name file name of a menu style plugin inside LOADER_MENU_STYLES_PATH, or NULL or an
- *                 empty string for the built-in list. Copied; the previously loaded plugin is
- *                 unloaded once the menu no longer references it.
  */
+void loader_show_settings_menu(Loader* instance);
+
 void loader_set_menu_style(Loader* instance, const char* name);
 
+const MenuStyle* loader_get_menu_style(Loader* instance);
 /**
  * @brief Get loader pubsub
  * @param[in] instance loader instance

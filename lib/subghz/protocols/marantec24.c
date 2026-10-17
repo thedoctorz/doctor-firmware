@@ -79,8 +79,7 @@ static void subghz_protocol_marantec24_check_remote_controller(SubGhzBlockGeneri
 
 /**
  * Generating an upload from data.
- * @param context Pointer to a SubGhzProtocolEncoderMarantec24 instance
- * @return true Always; this encoder has no failure path
+ * @param instance Pointer to a SubGhzProtocolEncoderMarantec24 instance
  */
 static bool subghz_protocol_encoder_marantec24_get_upload(void* context) {
     SubGhzProtocolEncoderMarantec24* instance = context;

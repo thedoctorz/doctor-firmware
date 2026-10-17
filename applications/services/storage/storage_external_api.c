@@ -51,10 +51,6 @@ typedef enum {
     StorageEventFlagFileClose = (1 << 0),
 } StorageEventFlag;
 
-/****************** SHARED DISPATCH ******************/
-
-// These four carry the whole body of a dozen API calls that differ only in the command.
-
 static bool storage_file_command_bool(File* file, StorageCommand command) {
     S_FILE_API_PROLOGUE;
     S_API_PROLOGUE;

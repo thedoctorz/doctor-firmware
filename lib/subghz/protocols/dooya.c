@@ -82,7 +82,7 @@ void* subghz_protocol_encoder_dooya_alloc(SubGhzEnvironment* environment) {
 /**
  * Generating an upload from data.
  * @param instance Pointer to a SubGhzProtocolEncoderDooya instance
- * @return true Always; this encoder has no failure path
+ * @return true On success
  */
 static bool subghz_protocol_encoder_dooya_get_upload(void* context) {
     SubGhzProtocolEncoderDooya* instance = context;
@@ -208,10 +208,13 @@ void subghz_protocol_decoder_dooya_feed(void* context, bool level, uint32_t dura
                 instance->decoder.parser_step = DooyaDecoderStepFoundStartBit;
                 if(instance->decoder.decode_count_bit ==
                    subghz_protocol_dooya_const.min_count_bit_for_found) {
-                    instance->generic.data = instance->decoder.decode_data;
-                    instance->generic.data_count_bit = instance->decoder.decode_count_bit;
-                    if(instance->base.callback)
-                        instance->base.callback(&instance->base, instance->base.context);
+                    if(!subghz_protocol_blocks_key_is_degenerate(
+                           instance->decoder.decode_data, instance->decoder.decode_count_bit)) {
+                        instance->generic.data = instance->decoder.decode_data;
+                        instance->generic.data_count_bit = instance->decoder.decode_count_bit;
+                        if(instance->base.callback)
+                            instance->base.callback(&instance->base, instance->base.context);
+                    }
                 }
                 break;
             } else if(

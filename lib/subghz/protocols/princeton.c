@@ -321,7 +321,7 @@ static void subghz_protocol_princeton_check_remote_controller(SubGhzBlockGeneric
     }
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
     subghz_custom_btn_set_max(4);
@@ -434,7 +434,9 @@ void subghz_protocol_decoder_princeton_feed(void* context, bool level, uint32_t 
                 if(instance->decoder.decode_count_bit ==
                    subghz_protocol_princeton_const.min_count_bit_for_found) {
                     if((instance->last_data == instance->decoder.decode_data) &&
-                       instance->last_data) {
+                       instance->last_data &&
+                       !subghz_protocol_blocks_key_is_degenerate(
+                           instance->decoder.decode_data, instance->decoder.decode_count_bit)) {
                         instance->te /= (instance->decoder.decode_count_bit * 4 + 1);
 
                         instance->generic.data = instance->decoder.decode_data;

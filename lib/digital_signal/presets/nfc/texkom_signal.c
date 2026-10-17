@@ -2,20 +2,10 @@
 
 #include <digital_signal/digital_sequence.h>
 
-#include <nfc/protocols/texkom/texkom_i.h>
-
 #include <furi.h>
 
-// This module describes a waveform and has no business knowing what a variant is, so it keeps its
-// own copies of the frame size and the coding set. Pin them to the protocol layer's so the two
-// cannot drift apart unnoticed.
-_Static_assert(
-    TEXKOM_SIGNAL_FRAME_SIZE == TEXKOM_FRAME_SIZE,
-    "Texkom frame size disagrees with the protocol layer");
-_Static_assert(
-    (int)TexkomSignalCodingTk13 == (int)TexkomCodingTk13 &&
-        (int)TexkomSignalCodingTk17 == (int)TexkomCodingTk17,
-    "Texkom coding values disagree with the protocol layer");
+// Frame size and coding values are copied in texkom_signal.h so this file does
+// not include the NFC protocol headers. Those headers are not part of this firmware.
 
 #define BITS_IN_BYTE (8U)
 

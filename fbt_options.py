@@ -3,7 +3,8 @@ import posixpath
 
 # For more details on these options, run 'fbt -h'
 
-FIRMWARE_ORIGIN = "Unleashed"
+FIRMWARE_ORIGIN = "The_Doctors_Firmware"
+CATALOG_API_VERSION = "87.1"
 
 # Default hardware target
 TARGET_HW = 7
@@ -26,10 +27,8 @@ COPRO_CUBE_VERSION = "1.20.0"
 
 COPRO_CUBE_DIR = "lib/stm32wb_copro"
 
-# Default radio stack
-COPRO_STACK_BIN = "stm32wb5x_BLE_Stack_light_fw.bin"
-# Firmware also supports "ble_full", but it might not fit into debug builds
-COPRO_STACK_TYPE = "ble_light"
+COPRO_STACK_BIN = "stm32wb5x_BLE_Stack_full_fw.bin"
+COPRO_STACK_TYPE = "ble_full"
 
 # Leave 0 to let scripts automatically calculate it
 COPRO_STACK_ADDR = "0x0"
@@ -69,15 +68,6 @@ FIRMWARE_APPS = {
         "system_apps",
         # Settings
         "settings_apps",
-    ],
-    "unit_tests": [
-        "basic_services",
-        "updater_app",
-        "radio_device_cc1101_ext",
-        "unit_tests",
-        "js_app",
-        "infrared",
-        "archive",
     ],
 }
 

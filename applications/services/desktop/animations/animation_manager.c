@@ -8,7 +8,6 @@
 #include <assets_icons.h>
 
 #include "views/bubble_animation_view.h"
-#include "views/one_shot_animation_view.h"
 #include "animation_storage.h"
 #include "animation_manager.h"
 
@@ -18,11 +17,10 @@
 #define NO_SD_ANIMATION_NAME       "L1_NoSd_128x49"
 #define BAD_BATTERY_ANIMATION_NAME "L1_BadBattery_128x47"
 
-#define NO_DB_ANIMATION_NAME    "L0_NoDb_128x51"
-#define BAD_SD_ANIMATION_NAME   "L0_SdBad_128x51"
-#define SD_OK_ANIMATION_NAME    "L0_SdOk_128x51"
-#define URL_ANIMATION_NAME      "L0_Url_128x51"
-#define NEW_MAIL_ANIMATION_NAME "L0_NewMail_128x51"
+#define NO_DB_ANIMATION_NAME  "L0_NoDb_128x51"
+#define BAD_SD_ANIMATION_NAME "L0_SdBad_128x51"
+#define SD_OK_ANIMATION_NAME  "L0_SdOk_128x51"
+#define URL_ANIMATION_NAME    "L0_Url_128x51"
 
 typedef enum {
     AnimationManagerStateIdle,
@@ -36,7 +34,6 @@ struct AnimationManager {
     FuriPubSubSubscription* pubsub_subscription_storage;
     FuriPubSubSubscription* pubsub_subscription_dolphin;
     BubbleAnimationView* animation_view;
-    OneShotView* one_shot_view;
     FuriTimer* idle_animation_timer;
     StorageAnimation* current_animation;
     AnimationManagerInteractCallback interact_callback;
@@ -47,13 +44,10 @@ struct AnimationManager {
     int32_t freezed_animation_time_left;
     ViewStack* view_stack;
 
-    bool dummy_mode            : 1;
     bool blocking_shown_url    : 1;
     bool blocking_shown_sd_bad : 1;
     bool blocking_shown_no_db  : 1;
     bool blocking_shown_sd_ok  : 1;
-    bool levelup_pending       : 1;
-    bool levelup_active        : 1;
 };
 
 static StorageAnimation*
@@ -66,8 +60,6 @@ static bool animation_manager_check_blocking(AnimationManager* animation_manager
 static bool animation_manager_is_valid_idle_animation(
     const StorageAnimationManifestInfo* info,
     const DolphinStats* stats);
-static void animation_manager_switch_to_one_shot_view(AnimationManager* animation_manager);
-static void animation_manager_switch_to_animation_view(AnimationManager* animation_manager);
 
 void animation_manager_set_context(AnimationManager* animation_manager, void* context) {
     furi_assert(animation_manager);
@@ -93,15 +85,6 @@ void animation_manager_set_interact_callback(
     AnimationManagerInteractCallback callback) {
     furi_assert(animation_manager);
     animation_manager->interact_callback = callback;
-}
-
-void animation_manager_set_dummy_mode_state(AnimationManager* animation_manager, bool enabled) {
-    furi_assert(animation_manager);
-    // Prevent change of animations if mode is the same
-    if(animation_manager->dummy_mode != enabled) {
-        animation_manager->dummy_mode = enabled;
-        animation_manager_start_new_idle(animation_manager);
-    }
 }
 
 static void animation_manager_storage_callback(const void* message, void* context) {
@@ -192,18 +175,7 @@ bool animation_manager_interact_process(AnimationManager* animation_manager) {
     furi_assert(animation_manager);
     bool consumed = true;
 
-    if(animation_manager->levelup_pending) {
-        animation_manager->levelup_pending = false;
-        animation_manager->levelup_active = true;
-        animation_manager_switch_to_one_shot_view(animation_manager);
-        Dolphin* dolphin = furi_record_open(RECORD_DOLPHIN);
-        dolphin_upgrade_level(dolphin);
-        furi_record_close(RECORD_DOLPHIN);
-    } else if(animation_manager->levelup_active) {
-        animation_manager->levelup_active = false;
-        animation_manager_start_new_idle(animation_manager);
-        animation_manager_switch_to_animation_view(animation_manager);
-    } else if(animation_manager->state == AnimationManagerStateBlocked) {
+    if(animation_manager->state == AnimationManagerStateBlocked) {
         bool blocked = animation_manager_check_blocking(animation_manager);
 
         if(!blocked) {
@@ -261,15 +233,6 @@ static bool animation_manager_check_blocking(AnimationManager* animation_manager
             furi_assert(blocking_animation);
             animation_manager->blocking_shown_url = false;
         }
-    }
-
-    Dolphin* dolphin = furi_record_open(RECORD_DOLPHIN);
-    DolphinStats stats = dolphin_stats(dolphin);
-    furi_record_close(RECORD_DOLPHIN);
-    if(!blocking_animation && stats.level_up_is_pending) {
-        blocking_animation = animation_storage_find_animation(NEW_MAIL_ANIMATION_NAME);
-        furi_check(blocking_animation);
-        animation_manager->levelup_pending = true;
     }
 
     if(blocking_animation) {
@@ -392,9 +355,7 @@ static bool animation_manager_is_valid_idle_animation(
 
 static StorageAnimation*
     animation_manager_select_idle_animation(AnimationManager* animation_manager) {
-    if(animation_manager->dummy_mode) {
-        return animation_storage_find_animation(HARDCODED_ANIMATION_NAME);
-    }
+    UNUSED(animation_manager);
     StorageAnimationList_t animation_list;
     StorageAnimationList_init(animation_list);
     animation_storage_fill_animation_list(&animation_list);
@@ -567,39 +528,4 @@ void animation_manager_load_and_continue_animation(AnimationManager* animation_m
     bubble_animation_unfreeze(animation_manager->animation_view);
     furi_string_reset(animation_manager->freezed_animation_name);
     furi_assert(animation_manager->current_animation);
-}
-
-static void animation_manager_switch_to_one_shot_view(AnimationManager* animation_manager) {
-    furi_assert(animation_manager);
-    furi_assert(!animation_manager->one_shot_view);
-    Dolphin* dolphin = furi_record_open(RECORD_DOLPHIN);
-    DolphinStats stats = dolphin_stats(dolphin);
-    furi_record_close(RECORD_DOLPHIN);
-
-    animation_manager->one_shot_view = one_shot_view_alloc();
-    one_shot_view_set_interact_callback(
-        animation_manager->one_shot_view, animation_manager_interact_callback, animation_manager);
-    View* prev_view = bubble_animation_get_view(animation_manager->animation_view);
-    View* next_view = one_shot_view_get_view(animation_manager->one_shot_view);
-    view_stack_remove_view(animation_manager->view_stack, prev_view);
-    view_stack_add_view(animation_manager->view_stack, next_view);
-    if(stats.level == 1) {
-        one_shot_view_start_animation(animation_manager->one_shot_view, &A_Levelup1_128x64);
-    } else if(stats.level == 2) {
-        one_shot_view_start_animation(animation_manager->one_shot_view, &A_Levelup2_128x64);
-    } else {
-        furi_crash();
-    }
-}
-
-static void animation_manager_switch_to_animation_view(AnimationManager* animation_manager) {
-    furi_assert(animation_manager);
-    furi_assert(animation_manager->one_shot_view);
-
-    View* prev_view = one_shot_view_get_view(animation_manager->one_shot_view);
-    View* next_view = bubble_animation_get_view(animation_manager->animation_view);
-    view_stack_remove_view(animation_manager->view_stack, prev_view);
-    view_stack_add_view(animation_manager->view_stack, next_view);
-    one_shot_view_free(animation_manager->one_shot_view);
-    animation_manager->one_shot_view = NULL;
 }

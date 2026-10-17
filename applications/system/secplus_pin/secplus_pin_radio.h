@@ -16,26 +16,12 @@ typedef struct {
     size_t custom_preset_size;
 } SecPlusPinPreset;
 
-/** Map a "FuriHalSubGhzPreset..." string to its enum.
- * @return false if the name is not a built-in preset, in which case *out is
- *         FuriHalSubGhzPresetCustom and Custom_preset_data must be supplied.
- */
 bool secplus_pin_preset_by_name(const char* name, FuriHalSubGhzPreset* out);
 
 typedef enum {
     SecPlusPinTxOk,
-    /** the region does not allow transmitting on this frequency */
     SecPlusPinTxNotAllowed,
-    /** the radio could not be claimed, or the signal could not be built */
     SecPlusPinTxError,
 } SecPlusPinTxStatus;
 
-/** Transmit one signal described by `fff` (an in-memory flipper format). */
 SecPlusPinTxStatus secplus_pin_radio_tx(const SecPlusPinPreset* preset, FlipperFormat* fff);
-
-/** Claim the radio for the whole app run, and release it. */
-void secplus_pin_radio_open(void);
-void secplus_pin_radio_close(void);
-
-/** True when an external CC1101 module is in use, false for the internal radio. */
-bool secplus_pin_radio_is_external(void);

@@ -2,11 +2,13 @@
 
 enum SubmenuIndex {
     SubmenuIndexRead = 10,
+    SubmenuIndexReadDual,
     SubmenuIndexSaved,
     SubmenuIndexAddManually,
     SubmenuIndexAddManuallyAdvanced,
-    SubmenuIndexFrequencyAnalyzer,
     SubmenuIndexReadRAW,
     SubmenuIndexExtSettings,
     SubmenuIndexRadioSetting,
+    SubmenuIndexCleanDupes,
+    SubmenuIndexSettingsUser,
 };

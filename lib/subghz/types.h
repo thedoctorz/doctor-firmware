@@ -15,6 +15,7 @@
 #define SUBGHZ_RAW_FOLDER             EXT_PATH("subghz")
 #define SUBGHZ_APP_FILENAME_PREFIX    "SubGHz"
 #define SUBGHZ_APP_FILENAME_EXTENSION ".sub"
+#define SUBGHZ_PSF_FILENAME_EXTENSION ".psf"
 
 #define SUBGHZ_KEY_FILE_VERSION 1
 #define SUBGHZ_KEY_FILE_TYPE    "Flipper SubGhz Key File"
@@ -24,9 +25,12 @@
 
 #define SUBGHZ_KEYSTORE_DIR_NAME      EXT_PATH("subghz/assets/keeloq_mfcodes")
 #define SUBGHZ_KEYSTORE_DIR_USER_NAME EXT_PATH("subghz/assets/keeloq_mfcodes_user")
+#define SUBGHZ_KEYSTORE_KIA_DIR_NAME  EXT_PATH("subghz/assets/kia_mfcodes")
 #define SUBGHZ_CAME_ATOMO_DIR_NAME    EXT_PATH("subghz/assets/came_atomo")
 #define SUBGHZ_NICE_FLOR_S_DIR_NAME   EXT_PATH("subghz/assets/nice_flor_s")
 #define SUBGHZ_ALUTECH_AT_4N_DIR_NAME EXT_PATH("subghz/assets/alutech_at_4n")
+#define SUBGHZ_VAG_KEYS_FILE          EXT_PATH("subghz/assets/vag")
+#define SUBGHZ_HITAG2_KEYS_FILE       EXT_PATH("subghz/assets/hitag2_keys.txt")
 
 typedef struct SubGhzProtocolRegistry SubGhzProtocolRegistry;
 typedef struct SubGhzEnvironment SubGhzEnvironment;

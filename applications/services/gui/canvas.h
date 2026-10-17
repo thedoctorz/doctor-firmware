@@ -286,6 +286,24 @@ void canvas_draw_icon_animation(
     int32_t y,
     IconAnimation* icon_animation);
 
+/** Draw animation at position x,y, magnified by an integer scale factor.
+ *
+ * Each source pixel is drawn as a scale x scale block (nearest-neighbour), so a
+ * scale of 1 is identical to canvas_draw_icon_animation.
+ *
+ * @param      canvas          Canvas instance
+ * @param      x               x coordinate
+ * @param      y               y coordinate
+ * @param      icon_animation  IconAnimation instance
+ * @param      scale           integer magnification factor (>= 1)
+ */
+void canvas_draw_icon_animation_scaled(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    IconAnimation* icon_animation,
+    uint8_t scale);
+
 /** Draw icon at position defined by x,y.
  *
  * @param      canvas  Canvas instance

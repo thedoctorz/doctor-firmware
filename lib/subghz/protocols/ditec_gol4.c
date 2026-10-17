@@ -329,7 +329,7 @@ static void subghz_protocol_ditec_gol4_decode_key(SubGhzBlockGeneric* instance) 
         instance->btn = decrypted[2] & 0x0F;
         instance->cnt = (uint16_t)((decrypted[5] | (decrypted[6] << 8)) & 0xFFFF);
         // Save original button for later use
-        if(subghz_custom_btn_get_original() == 0) {
+        if(!subghz_custom_btn_has_original()) {
             subghz_custom_btn_set_original(instance->btn);
         }
         subghz_custom_btn_set_max(4);
@@ -342,7 +342,7 @@ static void subghz_protocol_ditec_gol4_encode_key(SubGhzBlockGeneric* instance) 
     uint8_t decrypted[GOL4_RAW_BYTES];
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
 

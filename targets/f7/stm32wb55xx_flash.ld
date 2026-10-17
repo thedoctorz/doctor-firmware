@@ -3,10 +3,10 @@ ENTRY(Reset_Handler)
 /* Highest address of the user mode stack */
 _stack_end = 0x20030000;    /* end of RAM */
 /* Generate a link error if heap and stack don't fit into RAM */
-_stack_size = 0x400; /* required amount of stack */
+_stack_size = 0x800; /* required amount of stack */
 
 MEMORY {
-    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 1024K
+    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 824K
     RAM1  (xrw) : ORIGIN = 0x20000008, LENGTH = 0x2FFF8
     RAM2A (xrw) : ORIGIN = 0x20030000, LENGTH = 10K
     RAM2B (xrw) : ORIGIN = 0x20038000, LENGTH = 10K

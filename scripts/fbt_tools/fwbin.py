@@ -1,9 +1,28 @@
+import os
+
 import SCons
 from SCons.Action import Action
 from SCons.Builder import Builder
 
 __OBJCOPY_ARM_BIN = "arm-none-eabi-objcopy"
 __NM_ARM_BIN = "arm-none-eabi-nm"
+
+
+def _copro_load_addr(env):
+    """Flash install address of the configured radio stack, or None if unavailable."""
+    try:
+        stack_bin = os.path.join(
+            env.subst("${ROOT_DIR.abspath}"),
+            env.subst("${COPRO_STACK_BIN_DIR}"),
+            env.subst("${COPRO_STACK_BIN}"),
+        )
+        if not os.path.isfile(stack_bin):
+            return None
+        from flipper.assets.coprobin import CoproBinary
+
+        return CoproBinary(stack_bin).get_flash_load_addr()
+    except Exception:
+        return None
 
 
 def generate(env):
@@ -13,6 +32,14 @@ def generate(env):
         OBJCOPY=__OBJCOPY_ARM_BIN,  # FIXME
         NM=__NM_ARM_BIN,  # FIXME
     )
+
+    copro_base = _copro_load_addr(env)
+    if copro_base is not None:
+        env["ENV"]["FBT_COPRO_BASE"] = f"{copro_base:#010x}"
+
+    for var in ("FBT_COPRO_BASE", "FBT_ALLOW_COPRO_OVERLAP"):
+        if var in os.environ:
+            env["ENV"][var] = os.environ[var]
 
     if not env["VERBOSE"]:
         env.SetDefault(

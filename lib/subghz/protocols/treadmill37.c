@@ -79,8 +79,7 @@ static void subghz_protocol_treadmill37_check_remote_controller(SubGhzBlockGener
 
 /**
  * Generating an upload from data.
- * @param context Pointer to a SubGhzProtocolEncoderTreadmill37 instance
- * @return true Always; this encoder has no failure path
+ * @param instance Pointer to a SubGhzProtocolEncoderTreadmill37 instance
  */
 static bool subghz_protocol_encoder_treadmill37_get_upload(void* context) {
     SubGhzProtocolEncoderTreadmill37* instance = context;

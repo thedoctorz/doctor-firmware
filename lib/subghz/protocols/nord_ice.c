@@ -13,41 +13,23 @@
 #define NORD_ICE_COUNT_BIT 33
 
 static const SubGhzBlockConst subghz_protocol_nord_ice_const = {
-    // Measured off six captures of one remote: the bit period holds at 1030us, split
-    // roughly a quarter / three quarters, and the two gaps are not multiples of either half
     .te_short = 270,
     .te_long = 760,
     .te_delta = 150,
     .min_count_bit_for_found = NORD_ICE_COUNT_BIT,
 };
 
-/**
- * A press puts a pair of frames on air and repeats that pair for as long as the button is held:
- *
- *   [key | FLAG] [gap 8980us] [key] [gap 7440us] [key | FLAG] [gap 8980us] [key] ...
- *
- * The two frames are the same 33 bits except for bit 14, the top half of the frame field at
- * bits 14..13, and the gap closing a frame says which of the two it was. Nothing else moves
- * between them - no counter, no second key - so the flag is not part of the key. The decoder
- * clears it, which puts both frames of a pair on one entry instead of two, and the encoder
- * puts it back one frame at a time, which is also what makes a single-frame capture saved by
- * an older build transmit the full pair.
- */
 #define NORD_ICE_FRAME_FLAG (1ULL << 14)
 
-/** Gap that closes the flagged frame, and the shorter one that closes the plain frame, in us */
 #define NORD_ICE_GAP_FLAGGED 8980
 #define NORD_ICE_GAP_PLAIN   7440
 #define NORD_ICE_GAP_DELTA   (subghz_protocol_nord_ice_const.te_delta * 3)
 
-/** Both frames of a pair, two upload entries per bit */
 #define NORD_ICE_UPLOAD_SIZE (NORD_ICE_COUNT_BIT * 2 * 2)
 
-/** The button, one hot, at bits 12..9 */
 #define NORD_ICE_BTN_SHIFT 9
 #define NORD_ICE_BTN_MASK  (0xFULL << NORD_ICE_BTN_SHIFT)
 
-/** The four buttons in the order they sit on the remote */
 static const uint8_t subghz_protocol_nord_ice_btn_order[] = {0x4, 0x8, 0x1, 0x2};
 
 struct SubGhzProtocolDecoderNord_Ice {
@@ -113,15 +95,11 @@ void* subghz_protocol_encoder_nord_ice_alloc(SubGhzEnvironment* environment) {
 static void subghz_protocol_nord_ice_check_remote_controller(SubGhzBlockGeneric* instance);
 
 /**
- * Pick the button to send: the captured one, or the one an arrow key asks for.
- * @return Button code, one hot
  */
 static uint8_t subghz_protocol_nord_ice_get_btn_code(void) {
     const uint8_t custom_btn_id = subghz_custom_btn_get();
     const uint8_t original_btn_code = subghz_custom_btn_get_original();
 
-    // UP, DOWN and LEFT walk one, two and three buttons on from the captured one, which is
-    // every other button the remote has; OK, and anything unrecognised, keeps it as it was
     uint8_t step = 0;
     if(custom_btn_id == SUBGHZ_CUSTOM_BTN_UP) {
         step = 1;
@@ -143,13 +121,6 @@ static uint8_t subghz_protocol_nord_ice_get_btn_code(void) {
     return original_btn_code;
 }
 
-/**
- * Append one frame and the gap that closes it to the upload.
- * @param instance Pointer to a SubGhzProtocolEncoderNord_Ice instance
- * @param data The bits to put on air, flag included
- * @param gap Duration of the gap that closes the frame, in us
- * @param index In/out position in the upload buffer
- */
 static void subghz_protocol_encoder_nord_ice_add_frame(
     SubGhzProtocolEncoderNord_Ice* instance,
     uint64_t data,
@@ -158,7 +129,6 @@ static void subghz_protocol_encoder_nord_ice_add_frame(
     size_t index_local = *index;
 
     for(uint8_t i = instance->generic.data_count_bit; i > 0; i--) {
-        // The last bit has no low half of its own, the gap closing the frame stands in for it
         const bool is_last = (i == 1);
         if(bit_read(data, i - 1)) {
             // Send bit 1
@@ -178,30 +148,21 @@ static void subghz_protocol_encoder_nord_ice_add_frame(
     *index = index_local;
 }
 
-/**
- * Generating an upload from data.
- * @param context Pointer to a SubGhzProtocolEncoderNord_Ice instance
- * @return true Always; this encoder has no failure path
- */
 static bool subghz_protocol_encoder_nord_ice_get_upload(void* context) {
     SubGhzProtocolEncoderNord_Ice* instance = context;
     furi_assert(instance);
 
-    // Generate new key using custom or default button
     instance->generic.btn = subghz_protocol_nord_ice_get_btn_code();
 
-    // override button if we change it with signal settings button editor
     if(subghz_block_generic_global_button_override_get(&instance->generic.btn)) {
         FURI_LOG_D(TAG, "Button sucessfully changed to 0x%X", instance->generic.btn);
     }
 
-    // Only the button bits move - serial and the frame field stay as they came off the air
     instance->generic.data = (instance->generic.data & ~NORD_ICE_BTN_MASK) |
                              ((uint64_t)(instance->generic.btn & 0xF) << NORD_ICE_BTN_SHIFT);
 
     size_t index = 0;
 
-    // One repeat of the upload is the pair the remote sends, so repeating it reproduces a hold
     subghz_protocol_encoder_nord_ice_add_frame(
         instance, instance->generic.data | NORD_ICE_FRAME_FLAG, NORD_ICE_GAP_FLAGGED, &index);
     subghz_protocol_encoder_nord_ice_add_frame(
@@ -216,19 +177,14 @@ static bool subghz_protocol_encoder_nord_ice_get_upload(void* context) {
  * @param instance Pointer to a SubGhzBlockGeneric* instance
  */
 static void subghz_protocol_nord_ice_check_remote_controller(SubGhzBlockGeneric* instance) {
-    // Whichever frame of the pair was captured, the key is the one without the flag
     instance->data &= ~NORD_ICE_FRAME_FLAG;
-    instance->serial = (instance->data >> 15) << 9 |
-                       (instance->data & 0x1FF); // 27 bits for serial, split by the middle field
-    // One hot - one bit per button, which is all four of them on the remotes seen. Bit 13,
-    // the low half of the frame field, sits above it and is 1 on every frame of every button
-    instance->btn = (instance->data >> NORD_ICE_BTN_SHIFT) & 0xF; // 4 bits for button
+    instance->serial = (instance->data >> 15) << 9 | (instance->data & 0x1FF);
+    instance->btn = (instance->data >> NORD_ICE_BTN_SHIFT) & 0xF;
 
-    // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
-    // Four buttons, so OK plus three arrows covers every one of them
+
     subghz_custom_btn_set_max(3);
 }
 
@@ -245,15 +201,13 @@ SubGhzProtocolStatus
         if(ret != SubGhzProtocolStatusOk) {
             break;
         }
-        // Optional value
+
         flipper_format_read_uint32(
             flipper_format, "Repeat", (uint32_t*)&instance->encoder.repeat, 1);
 
-        // Splits the fields out, and clears the flag off a key saved by an older build
         subghz_protocol_nord_ice_check_remote_controller(&instance->generic);
         subghz_protocol_encoder_nord_ice_get_upload(instance);
 
-        // Write the key the chosen button produced back, so saving keeps what was sent
         if(!flipper_format_rewind(flipper_format)) {
             FURI_LOG_E(TAG, "Rewind error");
             break;
@@ -279,17 +233,12 @@ void* subghz_protocol_decoder_nord_ice_alloc(SubGhzEnvironment* environment) {
         sizeof(SubGhzProtocolDecoderNord_Ice), &subghz_protocol_nord_ice);
 }
 
-/**
- * Both gaps open a frame, so either one is a valid place to start reading.
- * @param duration Duration of the low level, in us
- * @return true If the duration is one of the two gaps
- */
 static bool subghz_protocol_nord_ice_is_gap(uint32_t duration) {
     return (DURATION_DIFF(duration, NORD_ICE_GAP_PLAIN) < NORD_ICE_GAP_DELTA) ||
            (DURATION_DIFF(duration, NORD_ICE_GAP_FLAGGED) < NORD_ICE_GAP_DELTA);
 }
 
-void subghz_protocol_decoder_nord_ice_feed(void* context, bool level, volatile uint32_t duration) {
+void subghz_protocol_decoder_nord_ice_feed(void* context, bool level, uint32_t duration) {
     furi_assert(context);
     SubGhzProtocolDecoderNord_Ice* instance = context;
 
@@ -298,16 +247,6 @@ void subghz_protocol_decoder_nord_ice_feed(void* context, bool level, volatile u
 
     // Key samples
     //
-    //                       Serial        Frame Btn  Serial
-    // 0x9467288A btn 1 = 010010100011001110  01  0100 010001010
-    // 0x9467308A btn 2 = 010010100011001110  01  1000 010001010
-    // 0x9467228A btn 3 = 010010100011001110  01  0001 010001010
-    // 0x9467248A btn 4 = 010010100011001110  01  0010 010001010
-    //
-    // The button is one hot, one bit per button, and bits 14..13 are the frame field: the
-    // other frame of each pair is the same bits with 11 there, so on air the four also go
-    // out as 0x9467688A, 0x9467708A, 0x9467628A and 0x9467648A. Files saved by an older
-    // build hold whichever of the two was received.
 
     switch(instance->decoder.parser_step) {
     case Nord_IceDecoderStepReset:
@@ -328,14 +267,12 @@ void subghz_protocol_decoder_nord_ice_feed(void* context, bool level, volatile u
         break;
     case Nord_IceDecoderStepCheckDuration:
         if(!level) {
-            // Bit 0 is short and long timing = 270us HIGH (te_last) and 760us LOW
             if((DURATION_DIFF(instance->decoder.te_last, subghz_protocol_nord_ice_const.te_short) <
                 subghz_protocol_nord_ice_const.te_delta) &&
                (DURATION_DIFF(duration, subghz_protocol_nord_ice_const.te_long) <
                 subghz_protocol_nord_ice_const.te_delta)) {
                 subghz_protocol_blocks_add_bit(&instance->decoder, 0);
                 instance->decoder.parser_step = Nord_IceDecoderStepSaveDuration;
-                // Bit 1 is long and short timing = 760us HIGH (te_last) and 270us LOW
             } else if(
                 (DURATION_DIFF(instance->decoder.te_last, subghz_protocol_nord_ice_const.te_long) <
                  subghz_protocol_nord_ice_const.te_delta) &&
@@ -346,7 +283,6 @@ void subghz_protocol_decoder_nord_ice_feed(void* context, bool level, volatile u
             } else if(
                 // End of the key
                 subghz_protocol_nord_ice_is_gap(duration)) {
-                //Found next GAP, the last bit is left with its HIGH half only
                 if(DURATION_DIFF(
                        instance->decoder.te_last, subghz_protocol_nord_ice_const.te_short) <
                    subghz_protocol_nord_ice_const.te_delta) {
@@ -360,16 +296,13 @@ void subghz_protocol_decoder_nord_ice_feed(void* context, bool level, volatile u
                 // If got 33 bits key reading is finished
                 if(instance->decoder.decode_count_bit ==
                    subghz_protocol_nord_ice_const.min_count_bit_for_found) {
-                    // Drop the flag before the hash is taken off decode_data, so the two frames
-                    // of a pair come out as one entry in the read list instead of two
                     instance->decoder.decode_data &= ~NORD_ICE_FRAME_FLAG;
                     instance->generic.data = instance->decoder.decode_data;
                     instance->generic.data_count_bit = instance->decoder.decode_count_bit;
                     if(instance->base.callback)
                         instance->base.callback(&instance->base, instance->base.context);
                 }
-                // This gap opens the next frame too - the pair goes out back to back, so
-                // going back to Reset here would throw away every second frame
+
                 instance->decoder.decode_data = 0;
                 instance->decoder.decode_count_bit = 0;
                 instance->decoder.parser_step = Nord_IceDecoderStepSaveDuration;
@@ -402,11 +335,9 @@ void subghz_protocol_decoder_nord_ice_get_string(void* context, FuriString* outp
     uint64_t code_found_reverse = subghz_protocol_blocks_reverse_key(
         instance->generic.data, instance->generic.data_count_bit);
 
-    // push protocol data to global variable
     subghz_block_generic_global.btn_is_available = true;
     subghz_block_generic_global.current_btn = instance->generic.btn;
     subghz_block_generic_global.btn_length_bit = 4;
-    //
 
     furi_string_cat_printf(
         output,

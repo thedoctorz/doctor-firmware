@@ -10,7 +10,6 @@ static int32_t findmy_startup_apply(void* context) {
     UNUSED(context);
     FURI_LOG_D(TAG, "Loading state");
 
-    // Wait for BT init and check core2
     furi_record_open(RECORD_BT);
     furi_record_close(RECORD_BT);
     if(!furi_hal_bt_is_gatt_gap_supported()) return 0;

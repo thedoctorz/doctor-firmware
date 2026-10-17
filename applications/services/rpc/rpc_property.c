@@ -31,6 +31,8 @@ static void
     PB_Main* response = ctx->response;
 
     if(!strncmp(key, furi_string_get_cstr(ctx->subkey), furi_string_size(ctx->subkey))) {
+        response->which_content = PB_Main_property_get_response_tag;
+        response->has_next = true;
         response->content.system_device_info_response.key = strdup(key);
         response->content.system_device_info_response.value = strdup(value);
         rpc_send_and_release(session, response);
@@ -62,7 +64,7 @@ static void rpc_system_property_get_process(const PB_Main* request, void* contex
         furi_string_right(subkey, sep_idx + 1);
     }
 
-    PB_Main* response = malloc(sizeof(PB_Main));
+    PB_Main* response = rpc_message_alloc();
 
     response->command_id = request->command_id;
     response->command_status = PB_CommandStatus_OK;

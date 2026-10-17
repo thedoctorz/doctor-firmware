@@ -43,6 +43,20 @@ void subghz_protocol_raw_save_to_file_stop(SubGhzProtocolDecoderRAW* instance);
 size_t subghz_protocol_raw_get_sample_write(SubGhzProtocolDecoderRAW* instance);
 
 /**
+ * Save encoded upload buffer to a RAW file.
+ * @param upload Pointer to LevelDuration upload buffer
+ * @param upload_size Upload buffer size
+ * @param preset The modulation preset, SubGhzRadioPreset
+ * @param file_path Full path to output file
+ * @return true On success
+ */
+bool subghz_protocol_raw_save_upload_to_file(
+    const LevelDuration* upload,
+    size_t upload_size,
+    SubGhzRadioPreset* preset,
+    const char* file_path);
+
+/**
  * Allocate SubGhzProtocolDecoderRAW.
  * @param environment Pointer to a SubGhzEnvironment instance
  * @return SubGhzProtocolDecoderRAW* pointer to a SubGhzProtocolDecoderRAW instance

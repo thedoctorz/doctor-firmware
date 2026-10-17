@@ -355,7 +355,7 @@ static uint8_t subghz_protocol_alutech_at_4n_get_btn_code(void);
 /**
  * Generating an upload from data.
  * @param instance Pointer to a SubGhzProtocolEncoderAlutech instance
- * @return true Always; this encoder has no failure path
+ * @return true On success
  */
 static bool subghz_protocol_encoder_alutech_at_4n_get_upload(
     SubGhzProtocolEncoderAlutech_at_4n* instance,
@@ -363,7 +363,7 @@ static bool subghz_protocol_encoder_alutech_at_4n_get_upload(
     furi_assert(instance);
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(btn);
     }
 
@@ -680,7 +680,7 @@ static void subghz_protocol_alutech_at_4n_remote_controller(
     }
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
     subghz_custom_btn_set_max(4);
@@ -698,6 +698,8 @@ SubGhzProtocolStatus subghz_protocol_decoder_alutech_at_4n_serialize(
     SubGhzRadioPreset* preset) {
     furi_assert(context);
     SubGhzProtocolDecoderAlutech_at_4n* instance = context;
+    subghz_protocol_alutech_at_4n_remote_controller(
+        &instance->generic, instance->crc, instance->alutech_at_4n_rainbow_table_file_name);
     SubGhzProtocolStatus res =
         subghz_block_generic_serialize(&instance->generic, flipper_format, preset);
     if(!flipper_format_rewind(flipper_format)) {

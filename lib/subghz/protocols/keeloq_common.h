@@ -123,7 +123,6 @@ uint64_t subghz_protocol_keeloq_common_magic_serial_type2_learning(uint32_t data
  */
 uint64_t
     subghz_protocol_keeloq_common_learning_telcoma_table(uint32_t data, const uint32_t table[4]);
-
 /** Magic_serial_type3 Learning
  * @param data - btn+serial number (32bit)
  * @param man - magic man (64bit)
@@ -155,7 +154,6 @@ uint64_t subghz_protocol_keeloq_common_learning_stagnoli(uint32_t data, const ui
  * @return true if both halves were found
  */
 bool subghz_protocol_keeloq_common_get_telcoma_table(SubGhzKeystore* keystore, uint32_t table[4]);
-
 // Utils
 uint32_t subghz_protocol_keeloq_common_decrypt_derived(
     uint32_t hop_encrypted,

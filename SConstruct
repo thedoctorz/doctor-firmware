@@ -7,7 +7,6 @@
 # construction of certain targets behind command-line options.
 
 import os
-from fbt.util import open_browser_action
 
 DefaultEnvironment(tools=[])
 
@@ -42,7 +41,6 @@ distenv = coreenv.Clone(
         "openocd",
         "blackmagic",
         "jflash",
-        "doxygen",
         "textfile",
     ],
     ENV=os.environ,
@@ -493,18 +491,3 @@ distenv.PhonyTarget(
     "env",
     "@echo $( ${FBT_SCRIPT_DIR.abspath}/toolchain/fbtenv.sh $)",
 )
-
-doxy_build = distenv.DoxyBuild(
-    "documentation/doxygen/build/html/index.html",
-    "documentation/doxygen/Doxyfile-awesome.cfg",
-    doxy_env_variables={
-        "DOXY_SRC_ROOT": Dir(".").abspath,
-        "DOXY_BUILD_DIR": Dir("documentation/doxygen/build").abspath,
-        "DOXY_CONFIG_DIR": "documentation/doxygen",
-    },
-)
-distenv.Alias("doxygen", doxy_build)
-distenv.AlwaysBuild(doxy_build)
-
-# Open generated documentation in browser
-distenv.PhonyTarget("doxy", open_browser_action, source=doxy_build)

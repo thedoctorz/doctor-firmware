@@ -13,26 +13,10 @@
 
 static const char* archive_get_flipper_app_name(ArchiveFileTypeEnum file_type) {
     switch(file_type) {
-    case ArchiveFileTypeIButton:
-        return "iButton";
-    case ArchiveFileTypeNFC:
-        return "NFC";
     case ArchiveFileTypeSubGhz:
         return "Sub-GHz";
-    case ArchiveFileTypeSubGhzRemote:
-        return "Sub-GHz Remote";
-    case ArchiveFileTypeLFRFID:
-        return "125 kHz RFID";
-    case ArchiveFileTypeInfrared:
-        return "Infrared";
-    case ArchiveFileTypeBadUsb:
-        return "Bad USB";
-    case ArchiveFileTypeU2f:
-        return "U2F";
     case ArchiveFileTypeUpdateManifest:
         return "UpdaterApp";
-    case ArchiveFileTypeJS:
-        return EXT_PATH("apps/assets/js_app.fap");
     case ArchiveFileTypeFolder:
         return "Archive";
     default:
@@ -139,11 +123,18 @@ bool archive_scene_browser_on_event(void* context, SceneManagerEvent event) {
             consumed = true;
             break;
         case ArchiveBrowserEventFileMenuRun:
-            if(selected->type == ArchiveFileTypeFolder) {
+            if(selected && furi_string_start_with_str(selected->path, "/app:search")) {
+                archive_show_file_menu(browser, false);
+                if(furi_string_search_str(selected->path, "Cancel") != FURI_STRING_FAILURE) {
+                    archive_search_stop(archive);
+                } else {
+                    scene_manager_next_scene(archive->scene_manager, ArchiveAppSceneSearch);
+                }
+            } else if(selected && selected->type == ArchiveFileTypeFolder) {
                 archive_switch_tab(browser, TAB_LEFT);
                 archive_show_file_menu(browser, false);
                 archive_enter_dir(browser, selected->path);
-            } else if(archive_is_known_app(selected->type)) {
+            } else if(selected && archive_is_known_app(selected->type)) {
                 archive_run_in_app(browser, selected);
                 archive_show_file_menu(browser, false);
             }
@@ -186,6 +177,11 @@ bool archive_scene_browser_on_event(void* context, SceneManagerEvent event) {
                     archive->scene_manager, ArchiveAppSceneBrowser, SCENE_STATE_NEED_REFRESH);
                 scene_manager_next_scene(archive->scene_manager, ArchiveAppSceneNewDir);
             }
+            consumed = true;
+            break;
+        case ArchiveBrowserEventFileMenuSearch:
+            archive_show_file_menu(browser, false);
+            scene_manager_next_scene(archive->scene_manager, ArchiveAppSceneSearch);
             consumed = true;
             break;
         case ArchiveBrowserEventFileMenuCut:
@@ -319,7 +315,17 @@ bool archive_scene_browser_on_event(void* context, SceneManagerEvent event) {
             break;
 
         case ArchiveBrowserEventExit:
-            if(!archive_is_home(browser)) {
+            if(furi_string_start_with_str(browser->path, "/app:search")) {
+                archive_search_stop(archive);
+                archive_file_array_rm_all(browser);
+                if(furi_string_size(archive->search_restore_path)) {
+                    furi_string_set(browser->path, archive->search_restore_path);
+                } else {
+                    furi_string_set(
+                        browser->path, archive_get_default_path(archive_get_tab(browser)));
+                }
+                archive_refresh_dir(browser);
+            } else if(!archive_is_home(browser)) {
                 archive_leave_dir(browser);
             } else {
                 if(archive->loader_stop_subscription) {

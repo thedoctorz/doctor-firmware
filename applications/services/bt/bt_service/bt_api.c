@@ -41,6 +41,17 @@ void bt_disconnect(Bt* bt) {
     api_lock_wait_unlock_and_free(message.lock);
 }
 
+void bt_set_central_active(Bt* bt, bool active) {
+    furi_check(bt);
+
+    BtMessage message = {
+        .type = BtMessageTypeSetCentralActive,
+        .data.central_active = active,
+    };
+    furi_check(
+        furi_message_queue_put(bt->message_queue, &message, FuriWaitForever) == FuriStatusOk);
+}
+
 void bt_set_status_changed_callback(Bt* bt, BtStatusChangedCallback callback, void* context) {
     furi_check(bt);
 

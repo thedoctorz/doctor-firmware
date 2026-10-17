@@ -8,6 +8,9 @@
 #include <interface/patterns/ble_thread/shci/shci.h>
 #include <furi.h>
 #include <protobuf_version.h>
+#include <rpc/rpc.h>
+
+#define DOCTOR_RPC_SUBGHZ_VERSION 3
 
 FURI_WEAK void furi_hal_info_get_api_version(uint16_t* major, uint16_t* minor) {
     *major = 0;
@@ -170,10 +173,21 @@ void furi_hal_info_get(PropertyValueCallback out, char sep, void* context) {
 
         uint16_t api_version_major, api_version_minor;
         furi_hal_info_get_api_version(&api_version_major, &api_version_minor);
+#ifdef FAP_API_COMPAT_VERSION_MAJOR
+        property_value_out(
+            &property_context, "%d", 3, "firmware", "api", "major", FAP_API_COMPAT_VERSION_MAJOR);
+        property_value_out(
+            &property_context, "%d", 3, "firmware", "api", "minor", FAP_API_COMPAT_VERSION_MINOR);
+        property_value_out(
+            &property_context, "%d", 3, "firmware", "sdk", "major", api_version_major);
+        property_value_out(
+            &property_context, "%d", 3, "firmware", "sdk", "minor", api_version_minor);
+#else
         property_value_out(
             &property_context, "%d", 3, "firmware", "api", "major", api_version_major);
         property_value_out(
             &property_context, "%d", 3, "firmware", "api", "minor", api_version_minor);
+#endif
 
         property_value_out(
             &property_context,
@@ -357,9 +371,16 @@ void furi_hal_info_get(PropertyValueCallback out, char sep, void* context) {
 
     property_value_out(
         &property_context, "%u", 3, "protobuf", "version", "major", PROTOBUF_MAJOR_VERSION);
-    property_context.last = true;
     property_value_out(
         &property_context, "%u", 3, "protobuf", "version", "minor", PROTOBUF_MINOR_VERSION);
+
+    property_value_out(
+        &property_context, "%u", 3, "doctor", "rpc", "subghz", DOCTOR_RPC_SUBGHZ_VERSION);
+    property_value_out(&property_context, "%u", 3, "doctor", "rpc", "link", 1);
+    property_value_out(&property_context, "%u", 3, "doctor", "rpc", "buffer", RPC_BUFFER_SIZE);
+    property_context.last = true;
+    property_value_out(
+        &property_context, "%u", 3, "doctor", "rpc", "storage", RPC_STORAGE_MAX_DATA_SIZE);
 
     furi_string_free(key);
     furi_string_free(value);

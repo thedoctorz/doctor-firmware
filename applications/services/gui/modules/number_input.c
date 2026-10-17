@@ -1,6 +1,7 @@
 #include "number_input.h"
 
 #include <gui/elements.h>
+#include <gui/remote_keyboard.h>
 #include <furi.h>
 #include <assets_icons.h>
 #include <lib/toolbox/strint.h>
@@ -237,6 +238,29 @@ static void number_input_handle_ok(NumberInputModel* model) {
     }
 }
 
+static void number_input_remote_add(NumberInputModel* model, char digit) {
+    if(digit == '-') {
+        if(!number_input_use_sign(model)) return;
+        if(!furi_string_empty(model->text_buffer) &&
+           furi_string_cmp_str(model->text_buffer, "0") != 0) {
+            return;
+        }
+        number_input_sign(model);
+        return;
+    }
+    if(digit < '0' || digit > '9') return;
+    char text[2] = {digit, '\0'};
+    number_input_add_digit(model, text);
+}
+
+static void number_input_view_enter(void* context) {
+    remote_keyboard_acquire_number(context);
+}
+
+static void number_input_view_exit(void* context) {
+    remote_keyboard_release_number(context);
+}
+
 static void number_input_view_draw_callback(Canvas* canvas, void* _model) {
     NumberInputModel* model = _model;
 
@@ -385,6 +409,8 @@ NumberInput* number_input_alloc(void) {
     view_allocate_model(number_input->view, ViewModelTypeLocking, sizeof(NumberInputModel));
     view_set_draw_callback(number_input->view, number_input_view_draw_callback);
     view_set_input_callback(number_input->view, number_input_view_input_callback);
+    view_set_enter_callback(number_input->view, number_input_view_enter);
+    view_set_exit_callback(number_input->view, number_input_view_exit);
 
     with_view_model(
         number_input->view,
@@ -398,8 +424,48 @@ NumberInput* number_input_alloc(void) {
     return number_input;
 }
 
+bool number_input_remote_insert(NumberInput* number_input, const char* text) {
+    furi_check(number_input);
+    if(text == NULL) text = "";
+    with_view_model(
+        number_input->view,
+        NumberInputModel * model,
+        {
+            for(const char* cursor = text; *cursor != '\0'; cursor++) {
+                number_input_remote_add(model, *cursor);
+            }
+        },
+        true);
+    return true;
+}
+
+bool number_input_remote_backspace(NumberInput* number_input) {
+    furi_check(number_input);
+    with_view_model(
+        number_input->view, NumberInputModel * model, { number_input_backspace_cb(model); }, true);
+    return true;
+}
+
+bool number_input_remote_submit(NumberInput* number_input) {
+    furi_check(number_input);
+    with_view_model(
+        number_input->view,
+        NumberInputModel * model,
+        {
+            if(!is_number_too_large(model) && !is_number_too_small(model) &&
+               model->callback != NULL) {
+                model->current_number =
+                    (int32_t)strtol(furi_string_get_cstr(model->text_buffer), NULL, 10);
+                model->callback(model->callback_context, model->current_number);
+            }
+        },
+        true);
+    return true;
+}
+
 void number_input_free(NumberInput* number_input) {
     furi_check(number_input);
+    remote_keyboard_release_number(number_input);
     with_view_model(
         number_input->view,
         NumberInputModel * model,

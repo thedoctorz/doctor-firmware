@@ -80,8 +80,7 @@ static void subghz_protocol_feron_check_remote_controller(SubGhzBlockGeneric* in
 
 /**
  * Generating an upload from data.
- * @param context Pointer to a SubGhzProtocolEncoderFeron instance
- * @return true Always; this encoder has no failure path
+ * @param instance Pointer to a SubGhzProtocolEncoderFeron instance
  */
 static bool subghz_protocol_encoder_feron_get_upload(void* context) {
     SubGhzProtocolEncoderFeron* instance = context;

@@ -9,17 +9,9 @@
 #define FAP_MANIFEST_MAX_ICON_SIZE 32
 
 typedef enum {
-    ArchiveFileTypeIButton,
-    ArchiveFileTypeNFC,
     ArchiveFileTypeSubGhz,
-    ArchiveFileTypeSubGhzRemote,
-    ArchiveFileTypeLFRFID,
-    ArchiveFileTypeInfrared,
-    ArchiveFileTypeBadUsb,
-    ArchiveFileTypeU2f,
     ArchiveFileTypeApplication,
     ArchiveFileTypeUpdateManifest,
-    ArchiveFileTypeJS,
     ArchiveFileTypeFolder,
     ArchiveFileTypeUnknown,
     ArchiveFileTypeAppOrJs,

@@ -139,7 +139,8 @@ static bool flipper_application_process_manifest_section(
     }
 
     return storage_file_seek(file, offset, true) &&
-           storage_file_read(file, manifest, size) == size;
+           storage_file_read(file, manifest, sizeof(FlipperApplicationManifest)) ==
+               sizeof(FlipperApplicationManifest);
 }
 
 // we can't use const char* as context because we will lose the const qualifier

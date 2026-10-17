@@ -2,9 +2,11 @@
 
 enum SubmenuIndex {
     SubmenuIndexEmulate,
+    SubmenuIndexSaveAsRaw,
     SubmenuIndexEdit,
     SubmenuIndexDelete,
-    SubmenuIndexSignalSettings
+    SubmenuIndexSignalSettings,
+    SubmenuIndexSetFrequency,
 };
 
 void subghz_scene_saved_menu_submenu_callback(void* context, uint32_t index) {
@@ -18,6 +20,23 @@ void subghz_scene_saved_menu_on_enter(void* context) {
         subghz->submenu,
         "Emulate",
         SubmenuIndexEmulate,
+        subghz_scene_saved_menu_submenu_callback,
+        subghz);
+
+    if(subghz_txrx_protocol_is_transmittable(subghz->txrx, false) &&
+       subghz_txrx_get_decoder(subghz->txrx)->protocol->encoder->yield != NULL) {
+        submenu_add_item(
+            subghz->submenu,
+            "Save as RAW",
+            SubmenuIndexSaveAsRaw,
+            subghz_scene_saved_menu_submenu_callback,
+            subghz);
+    }
+
+    submenu_add_item(
+        subghz->submenu,
+        "Set Frequency",
+        SubmenuIndexSetFrequency,
         subghz_scene_saved_menu_submenu_callback,
         subghz);
 
@@ -58,7 +77,19 @@ bool subghz_scene_saved_menu_on_event(void* context, SceneManagerEvent event) {
         if(event.event == SubmenuIndexEmulate) {
             scene_manager_set_scene_state(
                 subghz->scene_manager, SubGhzSceneSavedMenu, SubmenuIndexEmulate);
-            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneTransmitter);
+            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReceiverInfo);
+            return true;
+        } else if(event.event == SubmenuIndexSaveAsRaw) {
+            scene_manager_set_scene_state(
+                subghz->scene_manager, SubGhzSceneSavedMenu, SubGhzCustomEventManagerSetKeyToRaw);
+            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneSaveName);
+            return true;
+        } else if(event.event == SubmenuIndexSetFrequency) {
+            scene_manager_set_scene_state(
+                subghz->scene_manager, SubGhzSceneSavedMenu, SubmenuIndexSetFrequency);
+            if(subghz_path_is_file(subghz->file_path) && subghz_file_available(subghz)) {
+                scene_manager_next_scene(subghz->scene_manager, SubGhzSceneSetFrequency);
+            }
             return true;
         } else if(event.event == SubmenuIndexDelete) {
             scene_manager_set_scene_state(

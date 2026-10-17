@@ -284,6 +284,45 @@ void canvas_draw_icon_animation(
         IconRotation0);
 }
 
+void canvas_draw_icon_animation_scaled(
+    Canvas* canvas,
+    int32_t x,
+    int32_t y,
+    IconAnimation* icon_animation,
+    uint8_t scale) {
+    furi_check(canvas);
+    furi_check(icon_animation);
+
+    if(scale <= 1) {
+        canvas_draw_icon_animation(canvas, x, y, icon_animation);
+        return;
+    }
+
+    x += canvas->offset_x;
+    y += canvas->offset_y;
+    uint8_t* icon_data = NULL;
+    compress_icon_decode(
+        canvas->compress_icon, icon_animation_get_data(icon_animation), &icon_data);
+
+    const size_t width = icon_animation_get_width(icon_animation);
+    const size_t height = icon_animation_get_height(icon_animation);
+    const size_t row_bytes = (width + 7) / 8;
+
+    for(size_t iy = 0; iy < height; iy++) {
+        const uint8_t* row = icon_data + iy * row_bytes;
+        for(size_t ix = 0; ix < width; ix++) {
+            if(row[ix / 8] & (1 << (ix % 8))) {
+                u8g2_DrawBox(
+                    &canvas->fb,
+                    x + (int32_t)(ix * scale),
+                    y + (int32_t)(iy * scale),
+                    scale,
+                    scale);
+            }
+        }
+    }
+}
+
 static void canvas_draw_u8g2_bitmap_int(
     u8g2_t* u8g2,
     u8g2_uint_t x,

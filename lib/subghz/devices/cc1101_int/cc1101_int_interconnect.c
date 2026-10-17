@@ -86,11 +86,21 @@ const SubGhzDeviceInterconnect subghz_device_cc1101_int_interconnect = {
 
     .get_rssi = furi_hal_subghz_get_rssi,
     .get_lqi = furi_hal_subghz_get_lqi,
+    .get_freq_est = furi_hal_subghz_get_freq_est,
+    .rssi_burst = furi_hal_subghz_rssi_burst,
 
     .rx_pipe_not_empty = furi_hal_subghz_rx_pipe_not_empty,
     .is_rx_data_crc_valid = furi_hal_subghz_is_rx_data_crc_valid,
     .read_packet = furi_hal_subghz_read_packet,
     .write_packet = furi_hal_subghz_write_packet,
+
+    .hop_begin = furi_hal_subghz_hop_begin,
+    .hop_prepare = furi_hal_subghz_hop_prepare,
+    .hop_goto = furi_hal_subghz_hop_goto,
+    .hop_resume = furi_hal_subghz_hop_resume,
+    .hop_end = furi_hal_subghz_hop_end,
+    .hop_read_image = furi_hal_subghz_hop_read_image,
+    .hop_get_shadow = furi_hal_subghz_hop_get_shadow,
 };
 
 const SubGhzDevice subghz_device_cc1101_int = {

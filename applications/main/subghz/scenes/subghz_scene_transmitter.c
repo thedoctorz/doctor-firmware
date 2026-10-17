@@ -1,6 +1,8 @@
 #include "../subghz_i.h"
 #include "../views/transmitter.h"
 #include <dolphin/dolphin.h>
+#include <lib/subghz/protocols/fiat_v1.h>
+#include <lib/subghz/protocols/renault_v1.h>
 
 #include <lib/subghz/blocks/custom_btn.h>
 
@@ -9,6 +11,48 @@
 #include "lib/subghz/blocks/generic.h"
 
 #define TAG "SubGhzSceneTransmitter"
+
+static bool
+    subghz_scene_transmitter_read_uint32(FlipperFormat* ff, const char* key, uint32_t* value) {
+    flipper_format_rewind(ff);
+    return flipper_format_read_uint32(ff, key, value, 1);
+}
+
+static void subghz_scene_transmitter_configure_button_map(FlipperFormat* ff) {
+    FuriString* protocol = furi_string_alloc();
+    uint32_t type = 0;
+    uint32_t rolling = 0;
+
+    if(flipper_format_rewind(ff) && flipper_format_read_string(ff, "Protocol", protocol)) {
+        subghz_scene_transmitter_read_uint32(ff, "Type", &type);
+        subghz_scene_transmitter_read_uint32(ff, "Rolling", &rolling);
+        subghz_custom_btn_configure_map(
+            furi_string_get_cstr(protocol),
+            type,
+            rolling ? SUBGHZ_CUSTOM_BTN_PROTOCOL_ROLL : SUBGHZ_CUSTOM_BTN_PROTOCOL_NONE);
+    } else {
+        subghz_custom_btn_map_reset();
+    }
+
+    furi_string_free(protocol);
+}
+
+static void subghz_scene_transmitter_apply_selected_button(FlipperFormat* ff) {
+    SubGhzCustomButtonMapItem item;
+    if(!subghz_custom_btn_map_get(subghz_custom_btn_get(), &item)) return;
+
+    uint32_t btn = item.code;
+    flipper_format_rewind(ff);
+    flipper_format_insert_or_update_uint32(ff, "Btn", &btn, 1);
+}
+
+static void subghz_scene_transmitter_restore_original_button(FlipperFormat* ff) {
+    if(!subghz_custom_btn_map_is_available() || !subghz_custom_btn_has_original()) return;
+
+    uint32_t btn = subghz_custom_btn_get_original();
+    flipper_format_rewind(ff);
+    flipper_format_insert_or_update_uint32(ff, "Btn", &btn, 1);
+}
 
 void subghz_scene_transmitter_callback(SubGhzCustomEvent event, void* context) {
     furi_assert(context);
@@ -29,6 +73,7 @@ bool subghz_scene_transmitter_update_data_show(void* context) {
         if(subghz_protocol_decoder_base_deserialize(
                decoder, subghz_txrx_get_fff_data(subghz->txrx)) == SubGhzProtocolStatusOk) {
             subghz_protocol_decoder_base_get_string(decoder, key_str);
+            subghz_scene_transmitter_configure_button_map(subghz_txrx_get_fff_data(subghz->txrx));
 
             subghz_txrx_get_frequency_and_modulation(
                 subghz->txrx, frequency_str, modulation_str, false);
@@ -78,12 +123,30 @@ bool subghz_scene_transmitter_on_event(void* context, SceneManagerEvent event) {
             // user press OK - start endless TX
             subghz->state_notifications = SubGhzNotificationStateIDLE;
             subghz_block_generic_global.endless_tx = true;
-            if(subghz_tx_start(subghz, subghz_txrx_get_fff_data(subghz->txrx))) {
+            FlipperFormat* ff = subghz_txrx_get_fff_data(subghz->txrx);
+            if(!subghz_block_generic_global.hitag2_replay_only &&
+               (fiat_v1_flipper_needs_hitag2_key(ff) || renault_v1_flipper_needs_hitag2_key(ff))) {
+                subghz_block_generic_global.endless_tx = false;
+                scene_manager_next_scene(subghz->scene_manager, SubGhzSceneFiatV1Key);
+                return true;
+            }
+            if(!subghz_block_generic_global.hitag2_replay_only) {
+                subghz_scene_transmitter_apply_selected_button(ff);
+            }
+            if(subghz_tx_start(subghz, ff)) {
                 subghz->state_notifications = SubGhzNotificationStateTx;
                 dolphin_deed(DolphinDeedSubGhzSend);
+            } else {
+                subghz_block_generic_global.endless_tx = false;
+                subghz_scene_transmitter_restore_original_button(ff);
+                subghz_scene_transmitter_update_data_show(subghz);
             }
             //redraw either way - TX start is also where a lost module is noticed
             subghz_scene_transmitter_update_data_show(subghz);
+            return true;
+        } else if(event.event == SubGhzCustomEventSceneFiatV1KeyTxStart) {
+            view_dispatcher_send_custom_event(
+                subghz->view_dispatcher, SubGhzCustomEventViewTransmitterSendStart);
             return true;
         } else if(event.event == SubGhzCustomEventViewTransmitterSendStop) {
             // user release OK
@@ -109,7 +172,10 @@ bool subghz_scene_transmitter_on_event(void* context, SceneManagerEvent event) {
             } else {
                 subghz->state_notifications = SubGhzNotificationStateIDLE;
                 subghz_txrx_stop(subghz->txrx);
-                if(subghz_custom_btn_get() != SUBGHZ_CUSTOM_BTN_OK) {
+                const bool have_button_map = subghz_custom_btn_map_is_available();
+                subghz_scene_transmitter_restore_original_button(
+                    subghz_txrx_get_fff_data(subghz->txrx));
+                if(!have_button_map && subghz_custom_btn_get() != SUBGHZ_CUSTOM_BTN_OK) {
                     subghz_custom_btn_set(SUBGHZ_CUSTOM_BTN_OK);
                     int32_t tmp_counter = furi_hal_subghz_get_rolling_counter_mult();
                     furi_hal_subghz_set_rolling_counter_mult(0);
@@ -122,6 +188,7 @@ bool subghz_scene_transmitter_on_event(void* context, SceneManagerEvent event) {
                     subghz_txrx_stop(subghz->txrx);
                     furi_hal_subghz_set_rolling_counter_mult(tmp_counter);
                 }
+                subghz_scene_transmitter_update_data_show(subghz);
             }
         }
         return true;
@@ -132,6 +199,9 @@ bool subghz_scene_transmitter_on_event(void* context, SceneManagerEvent event) {
 void subghz_scene_transmitter_on_exit(void* context) {
     SubGhz* subghz = context;
     subghz->state_notifications = SubGhzNotificationStateIDLE;
+    subghz_block_generic_global.hitag2_replay_only = false;
+    subghz_block_generic_global.endless_tx = false;
+    subghz_txrx_stop(subghz->txrx);
 
     subghz_txrx_reset_dynamic_and_custom_btns(subghz->txrx);
 }

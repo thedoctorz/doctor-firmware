@@ -5,19 +5,9 @@
 
 enum SubGhzSettingIndex {
     SubGhzSettingIndexFrequency,
-    SubGhzSettingIndexHopping,
     SubGhzSettingIndexModulation,
-    SubGhzSettingIndexBinRAW,
-    SubGhzSettingIndexIgnoreReversRB2,
-    SubGhzSettingIndexIgnoreAlarms,
-    SubGhzSettingIndexIgnoreSensors,
-    SubGhzSettingIndexIgnorePrinceton,
-    SubGhzSettingIndexIgnoreNiceFlorS,
-    SubGhzSettingIndexDeleteOldSignals,
-    SubGhzSettingIndexSound,
-    SubGhzSettingIndexResetToDefault,
-    SubGhzSettingIndexLock,
-    SubGhzSettingIndexRAWThresholdRSSI,
+    SubGhzSettingIndexHopping,
+    SubGhzSettingIndexModHopping,
 };
 
 #define RAW_THRESHOLD_RSSI_COUNT 11
@@ -92,11 +82,6 @@ const uint32_t speaker_value[COMBO_BOX_COUNT] = {
     SubGhzSpeakerStateEnable,
 };
 
-const uint32_t bin_raw_value[COMBO_BOX_COUNT] = {
-    SubGhzProtocolFlag_Decodable,
-    SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_BinRAW,
-};
-
 const char* const combobox_text[COMBO_BOX_COUNT] = {
     "OFF",
     "ON",
@@ -135,37 +120,73 @@ uint8_t subghz_scene_receiver_config_next_frequency(const uint32_t value, void* 
     return index;
 }
 
-uint8_t subghz_scene_receiver_config_next_preset(const char* preset_name, void* context) {
+static size_t
+    subghz_scene_receiver_config_walk(SubGhz* subghz, bool async_only, uint8_t mode, size_t arg) {
+    SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
+    size_t seen = 0;
+    for(size_t i = 0; i < subghz_setting_get_preset_count(setting); i++) {
+        if(!subghz_txrx_preset_fits_radio(subghz->txrx, i)) continue;
+        if(async_only && !subghz_setting_preset_is_async_serial(setting, i)) continue;
+        if((mode == 0 && seen == arg) || (mode == 2 && i == arg)) return mode == 0 ? i : seen;
+        seen++;
+    }
+    return mode == 1 ? seen : mode == 2 ? 0 : (size_t)-1;
+}
+
+#define subghz_scene_receiver_config_preset_nth(s, n) \
+    subghz_scene_receiver_config_walk(s, false, 0, n)
+#define subghz_scene_receiver_config_preset_count(s) \
+    subghz_scene_receiver_config_walk(s, false, 1, 0)
+#define subghz_scene_receiver_config_mod_nth(s, n) subghz_scene_receiver_config_walk(s, true, 0, n)
+#define subghz_scene_receiver_config_mod_count(s)  subghz_scene_receiver_config_walk(s, true, 1, 0)
+#define subghz_scene_receiver_config_mod_pos(s, idx) \
+    subghz_scene_receiver_config_walk(s, true, 2, idx)
+#define subghz_scene_receiver_config_mod_ok(s, idx)   \
+    (subghz_txrx_preset_fits_radio((s)->txrx, idx) && \
+     subghz_setting_preset_is_async_serial(subghz_txrx_get_setting((s)->txrx), idx))
+
+static uint8_t subghz_scene_receiver_config_next_preset(const char* preset_name, void* context) {
     furi_assert(context);
     SubGhz* subghz = context;
-    uint8_t index = 0;
-    SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
-
-    for(size_t i = 0; i < subghz_setting_get_preset_count(setting); i++) {
-        if(!strcmp(subghz_setting_get_preset_name(setting, i), preset_name)) {
-            index = i;
-            break;
-        } else {
-            //  index = subghz_setting_get_frequency_default_index(setting);
-        }
-    }
-    return index;
+    const int idx =
+        subghz_setting_get_inx_preset_by_name(subghz_txrx_get_setting(subghz->txrx), preset_name);
+    if(idx < 0) return 0;
+    return subghz_scene_receiver_config_walk(subghz, false, 2, (size_t)idx);
 }
+
+static uint8_t
+    subghz_scene_receiver_config_axis_value_index(SubGhz* subghz, SubGhzHopperMode axis) {
+    if(!subghz->last_settings->enable_hopping) return 0;
+    if((SubGhzHopperMode)subghz->last_settings->hopping_mode != axis) return 0;
+    return value_index_float(
+        subghz->last_settings->hopping_threshold, hopping_mode_value, HOPPING_MODE_COUNT);
+}
+
+static bool subghz_scene_receiver_config_show_mod_slots(SubGhz* subghz) {
+    return subghz->last_settings->enable_hopping &&
+           subghz->last_settings->hopping_mode == SubGhzHopperModePreset;
+}
+
+static void subghz_scene_receiver_config_reload_mod_slots(SubGhz* subghz, bool mods_were_visible) {
+    if(mods_were_visible == subghz_scene_receiver_config_show_mod_slots(subghz)) return;
+    view_dispatcher_send_custom_event(
+        subghz->view_dispatcher, SubGhzCustomEventSceneSettingReload);
+}
+
+static void subghz_scene_receiver_config_apply_mods(SubGhz* subghz);
 
 uint8_t subghz_scene_receiver_config_hopper_value_index(void* context) {
     furi_assert(context);
     SubGhz* subghz = context;
 
-    if(subghz_txrx_hopper_get_state(subghz->txrx) == SubGhzHopperStateOFF) {
-        return 0;
-    } else {
+    uint8_t index =
+        subghz_scene_receiver_config_axis_value_index(subghz, SubGhzHopperModeFrequency);
+    if(index) {
         variable_item_set_current_value_text(
             variable_item_list_get(subghz->variable_item_list, SubGhzSettingIndexFrequency),
             " -----");
-        return value_index_float(
-            subghz->last_settings->hopping_threshold, hopping_mode_value, HOPPING_MODE_COUNT);
-        ;
     }
+    return index;
 }
 
 static void subghz_scene_receiver_config_set_frequency(VariableItem* item) {
@@ -173,7 +194,16 @@ static void subghz_scene_receiver_config_set_frequency(VariableItem* item) {
     uint8_t index = variable_item_get_current_value_index(item);
     SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
 
-    if(subghz_txrx_hopper_get_state(subghz->txrx) == SubGhzHopperStateOFF) {
+    if(!subghz_txrx_hopper_owns_frequency(subghz->txrx)) {
+        const size_t count = subghz_setting_get_frequency_count(setting);
+        const uint8_t previous = subghz_setting_get_frequency_default_index(setting);
+        const bool next = count == 0 || index == (previous + 1) % count;
+        const uint8_t valid = subghz_txrx_frequency_valid_index(subghz->txrx, index, next);
+        if(valid != index) {
+            index = valid;
+            variable_item_set_current_value_index(item, index);
+        }
+
         char text_buf[10] = {0};
         uint32_t frequency = subghz_setting_get_frequency(setting, index);
         SubGhzRadioPreset preset = subghz_txrx_get_preset(subghz->txrx);
@@ -207,11 +237,39 @@ static void subghz_scene_receiver_config_set_frequency(VariableItem* item) {
     }
 }
 
+static bool subghz_scene_receiver_config_raw_auto(SubGhz* subghz) {
+    if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
+       SubGhzCustomEventManagerSet) {
+        return false;
+    }
+    return subghz_txrx_raw_auto_available(subghz_txrx_radio_device_get_name(subghz->txrx));
+}
+
 static void subghz_scene_receiver_config_set_preset(VariableItem* item) {
     SubGhz* subghz = variable_item_get_context(item);
     uint8_t index = variable_item_get_current_value_index(item);
     SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
+    const size_t preset_count = subghz_scene_receiver_config_preset_count(subghz);
 
+    if(subghz_scene_receiver_config_raw_auto(subghz) && index >= preset_count) {
+        subghz->last_settings->read_raw_auto = true;
+        variable_item_set_current_value_text(item, "AUTO");
+        int am = subghz_setting_get_inx_preset_by_name(setting, "AM650");
+        if(am >= 0) {
+            uint8_t* preset_data = subghz_setting_get_preset_data(setting, (size_t)am);
+            size_t preset_data_size = subghz_setting_get_preset_data_size(setting, (size_t)am);
+            SubGhzRadioPreset preset = subghz_txrx_get_preset(subghz->txrx);
+            subghz_txrx_set_tx_power(preset_data, preset_data_size, subghz->tx_power);
+            subghz_txrx_set_preset(
+                subghz->txrx, "AM650", preset.frequency, preset_data, preset_data_size);
+        }
+        return;
+    }
+    if(subghz_scene_receiver_config_raw_auto(subghz)) {
+        subghz->last_settings->read_raw_auto = false;
+    }
+
+    index = (uint8_t)subghz_scene_receiver_config_preset_nth(subghz, index);
     const char* preset_name = subghz_setting_get_preset_name(setting, index);
     variable_item_set_current_value_text(item, preset_name);
     //subghz->last_settings->preset = index;
@@ -231,6 +289,7 @@ static void subghz_scene_receiver_config_set_hopping(VariableItem* item) {
     SubGhz* subghz = variable_item_get_context(item);
     uint8_t index = variable_item_get_current_value_index(item);
     SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
+    const bool mods_were_visible = subghz_scene_receiver_config_show_mod_slots(subghz);
     VariableItem* frequency_item =
         variable_item_list_get(subghz->variable_item_list, SubGhzSettingIndexFrequency);
 
@@ -262,17 +321,99 @@ static void subghz_scene_receiver_config_set_hopping(VariableItem* item) {
         variable_item_set_current_value_index(
             frequency_item, subghz_setting_get_frequency_default_index(setting));
         variable_item_set_item_label(item, "Hopping");
-    } else {
+    } else if(subghz->last_settings->hopping_mode == SubGhzHopperModeFrequency) {
         variable_item_set_current_value_text(frequency_item, " -----");
         variable_item_set_current_value_index(
             frequency_item, subghz_setting_get_frequency_default_index(setting));
 
         variable_item_set_item_label(item, "Hopping RSSI");
+    } else {
+        variable_item_set_item_label(item, "Hopping RSSI");
     }
     subghz->last_settings->enable_hopping = index != 0;
-    subghz->last_settings->hopping_threshold = hopping_mode_value[index];
+    if(index != 0) {
+        subghz->last_settings->hopping_mode = SubGhzHopperModeFrequency;
+        subghz->last_settings->hopping_threshold = hopping_mode_value[index];
+
+        VariableItem* mod_hop_item =
+            variable_item_list_get(subghz->variable_item_list, SubGhzSettingIndexModHopping);
+        variable_item_set_current_value_index(mod_hop_item, 0);
+        variable_item_set_current_value_text(mod_hop_item, hopping_mode_text[0]);
+    }
+
+    subghz_txrx_hopper_set_mode(
+        subghz->txrx, (SubGhzHopperMode)subghz->last_settings->hopping_mode);
     subghz_txrx_hopper_set_state(
         subghz->txrx, index != 0 ? SubGhzHopperStateRunning : SubGhzHopperStateOFF);
+    subghz_scene_receiver_config_reload_mod_slots(subghz, mods_were_visible);
+}
+
+static void subghz_scene_receiver_config_set_mod_hopping(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+    const bool mods_were_visible = subghz_scene_receiver_config_show_mod_slots(subghz);
+    VariableItem* freq_hop_item =
+        variable_item_list_get(subghz->variable_item_list, SubGhzSettingIndexHopping);
+
+    variable_item_set_current_value_text(item, combobox_text[index]);
+
+    subghz->last_settings->enable_hopping = index != 0;
+    if(index != 0) {
+        subghz->last_settings->hopping_mode = SubGhzHopperModePreset;
+
+        variable_item_set_current_value_index(freq_hop_item, 0);
+        variable_item_set_current_value_text(freq_hop_item, hopping_mode_text[0]);
+        subghz_scene_receiver_config_apply_mods(subghz);
+    }
+
+    subghz_txrx_hopper_set_mode(
+        subghz->txrx, (SubGhzHopperMode)subghz->last_settings->hopping_mode);
+    subghz_txrx_hopper_set_state(
+        subghz->txrx, index != 0 ? SubGhzHopperStateRunning : SubGhzHopperStateOFF);
+    subghz_scene_receiver_config_reload_mod_slots(subghz, mods_were_visible);
+}
+
+static void subghz_scene_receiver_config_ensure_mods(SubGhz* subghz) {
+    const size_t first = subghz_scene_receiver_config_mod_nth(subghz, 0);
+    if(first == (size_t)-1) return;
+    uint32_t* slots[] = {
+        &subghz->last_settings->hopping_mod_a, &subghz->last_settings->hopping_mod_b};
+    for(size_t k = 0; k < 2; k++) {
+        if(!subghz_scene_receiver_config_mod_ok(subghz, *slots[k])) *slots[k] = first;
+    }
+}
+
+static void subghz_scene_receiver_config_apply_mods(SubGhz* subghz) {
+    subghz_txrx_hopper_set_presets(
+        subghz->txrx, subghz->last_settings->hopping_mod_a, subghz->last_settings->hopping_mod_b);
+}
+
+static void subghz_scene_receiver_config_set_mod_a(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    size_t preset_idx = subghz_scene_receiver_config_mod_nth(subghz, index);
+    if(preset_idx == (size_t)-1) return;
+
+    variable_item_set_current_value_text(
+        item, subghz_setting_get_preset_name(setting, preset_idx));
+    subghz->last_settings->hopping_mod_a = preset_idx;
+    subghz_scene_receiver_config_apply_mods(subghz);
+}
+
+static void subghz_scene_receiver_config_set_mod_b(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    size_t preset_idx = subghz_scene_receiver_config_mod_nth(subghz, index);
+    if(preset_idx == (size_t)-1) return;
+
+    variable_item_set_current_value_text(
+        item, subghz_setting_get_preset_name(setting, preset_idx));
+    subghz->last_settings->hopping_mod_b = preset_idx;
+    subghz_scene_receiver_config_apply_mods(subghz);
 }
 
 static void subghz_scene_receiver_config_set_speaker(VariableItem* item) {
@@ -281,18 +422,6 @@ static void subghz_scene_receiver_config_set_speaker(VariableItem* item) {
 
     variable_item_set_current_value_text(item, combobox_text[index]);
     subghz_txrx_speaker_set_state(subghz->txrx, speaker_value[index]);
-}
-
-static void subghz_scene_receiver_config_set_bin_raw(VariableItem* item) {
-    SubGhz* subghz = variable_item_get_context(item);
-    uint8_t index = variable_item_get_current_value_index(item);
-
-    variable_item_set_current_value_text(item, combobox_text[index]);
-    subghz->filter = bin_raw_value[index];
-    subghz_txrx_receiver_set_filter(subghz->txrx, subghz->filter);
-
-    // We can set here, but during subghz_last_settings_save filter was changed to ignore BinRAW
-    subghz->last_settings->filter = subghz->filter;
 }
 
 static void subghz_scene_receiver_config_set_raw_threshold_rssi(VariableItem* item) {
@@ -340,13 +469,50 @@ static void subghz_scene_receiver_config_set_delete_old_signals(VariableItem* it
     subghz->last_settings->delete_old_signals = index == 1;
 }
 
+static void subghz_scene_receiver_config_set_autosave(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    variable_item_set_current_value_text(item, combobox_text[index]);
+
+    subghz->last_settings->autosave = index == 1;
+}
+
+static const char* subghz_scene_receiver_config_gps_companion_text(SubGhz* subghz, uint8_t index) {
+    if(index != 1) return combobox_text[0];
+    return (subghz->gps && subghz_gps_companion_available(subghz->gps)) ? "ON" : "NO APP";
+}
+
+static void subghz_scene_receiver_config_set_gps_companion(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+
+    subghz->last_settings->gps_companion = index == 1;
+    if(subghz->gps) {
+        subghz_gps_set_companion_enabled(subghz->gps, index == 1);
+    }
+
+    variable_item_set_current_value_text(
+        item, subghz_scene_receiver_config_gps_companion_text(subghz, index));
+}
+
+static uint32_t subghz_scene_receiver_config_idx_lock = UINT32_MAX;
+static uint32_t subghz_scene_receiver_config_idx_reset = UINT32_MAX;
+
+static uint32_t subghz_scene_receiver_config_last_index(SubGhz* subghz) {
+    uint32_t n = 0;
+    while(variable_item_list_get(subghz->variable_item_list, (uint8_t)n) != NULL)
+        n++;
+    return n ? n - 1 : 0;
+}
+
 static void subghz_scene_receiver_config_var_list_enter_callback(void* context, uint32_t index) {
     furi_assert(context);
     SubGhz* subghz = context;
-    if(index == SubGhzSettingIndexLock) {
+    if(index == subghz_scene_receiver_config_idx_lock) {
         view_dispatcher_send_custom_event(
             subghz->view_dispatcher, SubGhzCustomEventSceneSettingLock);
-    } else if(index == SubGhzSettingIndexResetToDefault) {
+    } else if(index == subghz_scene_receiver_config_idx_reset) {
         // Reset all values to default state!
         subghz_txrx_set_preset_internal(
             subghz->txrx,
@@ -367,12 +533,14 @@ static void subghz_scene_receiver_config_var_list_enter_callback(void* context, 
         subghz->last_settings->preset_index = preset_index;
 
         subghz_threshold_rssi_set(subghz->threshold_rssi, raw_threshold_rssi_value[default_index]);
-        subghz->filter = bin_raw_value[0];
+        subghz->filter = SubGhzProtocolFlag_Decodable;
         subghz->ignore_filter = 0x00;
         subghz_txrx_receiver_set_filter(subghz->txrx, subghz->filter);
         subghz->last_settings->ignore_filter = subghz->ignore_filter;
         subghz->last_settings->filter = subghz->filter;
         subghz->last_settings->delete_old_signals = false;
+        subghz->last_settings->autosave = false;
+        subghz->last_settings->read_raw_auto = false;
         subghz->last_settings->tx_power = subghz->tx_power = 0;
         subghz_txrx_speaker_set_state(subghz->txrx, speaker_value[default_index]);
 
@@ -389,11 +557,13 @@ static void subghz_scene_receiver_config_var_list_enter_callback(void* context, 
     }
 }
 
-void subghz_scene_receiver_config_on_enter(void* context) {
-    SubGhz* subghz = context;
+static void subghz_scene_receiver_config_populate(SubGhz* subghz) {
     VariableItem* item;
     uint8_t value_index;
     SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
+    subghz->last_settings->preset_index =
+        subghz_txrx_preset_make_valid(subghz->txrx, subghz->tx_power);
+    subghz_scene_receiver_config_ensure_mods(subghz);
     SubGhzRadioPreset preset = subghz_txrx_get_preset(subghz->txrx);
 
     item = variable_item_list_add(
@@ -416,45 +586,80 @@ void subghz_scene_receiver_config_on_enter(void* context) {
         (frequency % 1000000) / 10000);
     variable_item_set_current_value_text(item, text_buf);
 
+    const bool raw_auto = subghz_scene_receiver_config_raw_auto(subghz);
+    const size_t preset_count = subghz_scene_receiver_config_preset_count(subghz);
+    uint8_t mod_count = (uint8_t)preset_count;
+    if(raw_auto && mod_count < 255) mod_count++;
     item = variable_item_list_add(
         subghz->variable_item_list,
         "Modulation",
-        subghz_setting_get_preset_count(setting),
+        mod_count,
         subghz_scene_receiver_config_set_preset,
         subghz);
-    value_index =
-        subghz_scene_receiver_config_next_preset(furi_string_get_cstr(preset.name), subghz);
-    variable_item_set_current_value_index(item, value_index);
-    variable_item_set_current_value_text(
-        item, subghz_setting_get_preset_name(setting, value_index));
-
-    if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
-       SubGhzCustomEventManagerSet) {
-        // Hopping
-        value_index = subghz_scene_receiver_config_hopper_value_index(subghz);
-        item = variable_item_list_add(
-            subghz->variable_item_list,
-            value_index ? "Hopping RSSI" : "Hopping",
-            HOPPING_MODE_COUNT,
-            subghz_scene_receiver_config_set_hopping,
-            subghz);
-
+    if(raw_auto && subghz->last_settings->read_raw_auto && mod_count > preset_count) {
+        variable_item_set_current_value_index(item, (uint8_t)preset_count);
+        variable_item_set_current_value_text(item, "AUTO");
+    } else {
+        value_index =
+            subghz_scene_receiver_config_next_preset(furi_string_get_cstr(preset.name), subghz);
         variable_item_set_current_value_index(item, value_index);
-        variable_item_set_current_value_text(item, hopping_mode_text[value_index]);
+        variable_item_set_current_value_text(item, furi_string_get_cstr(preset.name));
     }
 
     if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
        SubGhzCustomEventManagerSet) {
+        // Frequency hopping
+        value_index = subghz_scene_receiver_config_hopper_value_index(subghz);
         item = variable_item_list_add(
             subghz->variable_item_list,
-            "Bin RAW",
-            COMBO_BOX_COUNT,
-            subghz_scene_receiver_config_set_bin_raw,
+            "Frequ Hopping",
+            HOPPING_MODE_COUNT,
+            subghz_scene_receiver_config_set_hopping,
             subghz);
+        variable_item_set_current_value_index(item, value_index);
+        variable_item_set_current_value_text(item, hopping_mode_text[value_index]);
 
-        value_index = value_index_uint32(subghz->filter, bin_raw_value, COMBO_BOX_COUNT);
+        value_index = subghz_scene_receiver_config_show_mod_slots(subghz) ? 1 : 0;
+        item = variable_item_list_add(
+            subghz->variable_item_list,
+            "Mod Hopping",
+            COMBO_BOX_COUNT,
+            subghz_scene_receiver_config_set_mod_hopping,
+            subghz);
         variable_item_set_current_value_index(item, value_index);
         variable_item_set_current_value_text(item, combobox_text[value_index]);
+
+        if(subghz_scene_receiver_config_show_mod_slots(subghz)) {
+            const uint8_t mod_count = subghz_scene_receiver_config_mod_count(subghz);
+
+            value_index =
+                subghz_scene_receiver_config_mod_pos(subghz, subghz->last_settings->hopping_mod_a);
+            item = variable_item_list_add(
+                subghz->variable_item_list,
+                "Mod A",
+                mod_count,
+                subghz_scene_receiver_config_set_mod_a,
+                subghz);
+            variable_item_set_current_value_index(item, value_index);
+            variable_item_set_current_value_text(
+                item,
+                subghz_setting_get_preset_name(
+                    setting, subghz_scene_receiver_config_mod_nth(subghz, value_index)));
+
+            value_index =
+                subghz_scene_receiver_config_mod_pos(subghz, subghz->last_settings->hopping_mod_b);
+            item = variable_item_list_add(
+                subghz->variable_item_list,
+                "Mod B",
+                mod_count,
+                subghz_scene_receiver_config_set_mod_b,
+                subghz);
+            variable_item_set_current_value_index(item, value_index);
+            variable_item_set_current_value_text(
+                item,
+                subghz_setting_get_preset_name(
+                    setting, subghz_scene_receiver_config_mod_nth(subghz, value_index)));
+        }
     }
 
     if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
@@ -529,6 +734,29 @@ void subghz_scene_receiver_config_on_enter(void* context) {
         value_index = subghz->last_settings->delete_old_signals;
         variable_item_set_current_value_index(item, value_index);
         variable_item_set_current_value_text(item, combobox_text[value_index]);
+
+        item = variable_item_list_add(
+            subghz->variable_item_list,
+            "Autosave signals (to /subghz/autosaved)",
+            COMBO_BOX_COUNT,
+            subghz_scene_receiver_config_set_autosave,
+            subghz);
+
+        value_index = subghz->last_settings->autosave;
+        variable_item_set_current_value_index(item, value_index);
+        variable_item_set_current_value_text(item, combobox_text[value_index]);
+
+        item = variable_item_list_add(
+            subghz->variable_item_list,
+            "Phone GPS (geotag via app)",
+            COMBO_BOX_COUNT,
+            subghz_scene_receiver_config_set_gps_companion,
+            subghz);
+
+        value_index = subghz->last_settings->gps_companion;
+        variable_item_set_current_value_index(item, value_index);
+        variable_item_set_current_value_text(
+            item, subghz_scene_receiver_config_gps_companion_text(subghz, value_index));
     }
 
     // Enable speaker, will send all incoming noises and signals to speaker so you can listen how your remote sounds like :)
@@ -547,6 +775,7 @@ void subghz_scene_receiver_config_on_enter(void* context) {
        SubGhzCustomEventManagerSet) {
         // Reset to default
         variable_item_list_add(subghz->variable_item_list, "Reset to default", 1, NULL, NULL);
+        subghz_scene_receiver_config_idx_reset = subghz_scene_receiver_config_last_index(subghz);
 
         variable_item_list_set_enter_callback(
             subghz->variable_item_list,
@@ -557,6 +786,7 @@ void subghz_scene_receiver_config_on_enter(void* context) {
        SubGhzCustomEventManagerSet) {
         // Lock keyboard
         variable_item_list_add(subghz->variable_item_list, "Lock Keyboard", 1, NULL, NULL);
+        subghz_scene_receiver_config_idx_lock = subghz_scene_receiver_config_last_index(subghz);
         variable_item_list_set_enter_callback(
             subghz->variable_item_list,
             subghz_scene_receiver_config_var_list_enter_callback,
@@ -578,6 +808,11 @@ void subghz_scene_receiver_config_on_enter(void* context) {
         variable_item_set_current_value_index(item, value_index);
         variable_item_set_current_value_text(item, raw_threshold_rssi_text[value_index]);
     }
+}
+
+void subghz_scene_receiver_config_on_enter(void* context) {
+    SubGhz* subghz = context;
+    subghz_scene_receiver_config_populate(subghz);
     view_dispatcher_switch_to_view(subghz->view_dispatcher, SubGhzViewIdVariableItemList);
 }
 
@@ -592,6 +827,17 @@ bool subghz_scene_receiver_config_on_event(void* context, SceneManagerEvent even
             consumed = true;
         } else if(event.event == SubGhzCustomEventSceneSettingResetToDefault) {
             scene_manager_previous_scene(subghz->scene_manager);
+            consumed = true;
+        } else if(event.event == SubGhzCustomEventSceneSettingReload) {
+            uint8_t selected =
+                variable_item_list_get_selected_item_index(subghz->variable_item_list);
+            if(subghz_scene_receiver_config_show_mod_slots(subghz) &&
+               selected == SubGhzSettingIndexModHopping) {
+                selected = SubGhzSettingIndexModHopping + 1;
+            }
+            variable_item_list_reset(subghz->variable_item_list);
+            subghz_scene_receiver_config_populate(subghz);
+            variable_item_list_set_selected_item(subghz->variable_item_list, selected);
             consumed = true;
         }
     }

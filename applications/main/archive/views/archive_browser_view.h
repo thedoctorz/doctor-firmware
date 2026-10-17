@@ -28,13 +28,6 @@
 typedef enum {
     ArchiveTabFavorites,
     ArchiveTabSubGhz,
-    ArchiveTabSubGhzRemote,
-    ArchiveTabLFRFID,
-    ArchiveTabNFC,
-    ArchiveTabInfrared,
-    ArchiveTabIButton,
-    ArchiveTabBadUsb,
-    ArchiveTabU2f,
     ArchiveTabApplications,
     ArchiveTabInternal,
     ArchiveTabBrowser,
@@ -55,6 +48,7 @@ typedef enum {
     ArchiveBrowserEventFileMenuDelete,
     ArchiveBrowserEventFileMenuInfo,
     ArchiveBrowserEventFileMenuShow,
+    ArchiveBrowserEventFileMenuSearch,
     ArchiveBrowserEventFileMenuClose,
 
     ArchiveBrowserEventEnterDir,
@@ -92,6 +86,7 @@ struct ArchiveBrowserView {
     FuriString* path;
     InputKey last_tab_switch_dir;
     bool is_root;
+    bool search_running;
     FuriTimer* scroll_timer;
 };
 

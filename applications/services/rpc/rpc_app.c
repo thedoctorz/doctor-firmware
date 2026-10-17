@@ -86,7 +86,7 @@ static void rpc_system_app_send_state_response(
     RpcAppSystem* rpc_app,
     PB_App_AppState state,
     const char* name) {
-    PB_Main* response = malloc(sizeof(PB_Main));
+    PB_Main* response = rpc_message_alloc();
 
     response->which_content = PB_Main_app_state_response_tag;
     response->content.app_state_response.state = state;
@@ -145,6 +145,7 @@ static void rpc_system_app_start_process(const PB_Main* request, void* context) 
 
         char app_args_temp[RPC_SYSTEM_APP_TEMP_ARGS_SIZE];
         const char* app_args = request->content.app_start_request.args;
+
         bool app_args_forged = false;
 
         if(app_args && strcmp(app_args, "RPC") == 0) {
@@ -200,7 +201,7 @@ static void rpc_system_app_lock_status_process(const PB_Main* request, void* con
 
     FURI_LOG_D(TAG, "LockStatus");
 
-    PB_Main* response = malloc(sizeof(PB_Main));
+    PB_Main* response = rpc_message_alloc();
 
     response->command_id = request->command_id;
     response->which_content = PB_Main_app_lock_status_response_tag;
@@ -379,7 +380,7 @@ static void rpc_system_app_get_error_process(const PB_Main* request, void* conte
     RpcAppSystem* rpc_app = context;
     furi_assert(rpc_app);
 
-    PB_Main* response = malloc(sizeof(PB_Main));
+    PB_Main* response = rpc_message_alloc();
 
     response->command_id = request->command_id;
     response->which_content = PB_Main_app_get_error_response_tag;
@@ -472,7 +473,7 @@ void rpc_system_app_confirm(RpcAppSystem* rpc_app, bool result) {
 void rpc_system_app_set_callback(RpcAppSystem* rpc_app, RpcAppSystemCallback callback, void* ctx) {
     furi_check(rpc_app);
 
-    // Validated and stored under one lock, so the instance cannot be freed in between
+    // Validated and stored under one lock, so the instance cannot be freed in between.
     rpc_system_app_instances_lock();
     const bool valid = rpc_system_app_instance_is_valid(rpc_app);
     if(valid) {
@@ -509,7 +510,7 @@ void rpc_system_app_error_reset(RpcAppSystem* rpc_app) {
 void rpc_system_app_exchange_data(RpcAppSystem* rpc_app, const uint8_t* data, size_t data_size) {
     furi_check(rpc_app);
 
-    PB_Main* request = malloc(sizeof(PB_Main));
+    PB_Main* request = rpc_message_alloc();
 
     request->which_content = PB_Main_app_data_exchange_request_tag;
     PB_App_DataExchangeRequest* content = &request->content.app_data_exchange_request;

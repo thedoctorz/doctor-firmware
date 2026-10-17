@@ -77,14 +77,68 @@ def __invoke_git(args, source_dir):
     )
 
 
+def _anonymous_github_url(url):
+    """Strip Actions tokens from HTTPS remotes. Firmware GITHUB_TOKEN is
+    repo-scoped; sending it to public sibling remotes (protobuf) 403s."""
+    if not url or url.startswith("git@"):
+        return url
+    marker = "@github.com/"
+    at = url.find(marker)
+    if at == -1:
+        return url
+    scheme_end = url.find("://")
+    if scheme_end == -1:
+        return url
+    return url[: scheme_end + 3] + url[at + 1 :]
+
+
+def _proto_ver_fallback(src_dir, env):
+    env_ver = os.environ.get("PROTOBUF_VERSION", "").strip()
+    if env_ver:
+        print(f"Protobuf version from PROTOBUF_VERSION: {env_ver}")
+        return env_ver
+
+    firmware_root = env.Dir("#").abspath
+    for path in (
+        os.path.join(src_dir, "VERSION"),
+        os.path.join(firmware_root, "assets", "protobuf.version"),
+    ):
+        if not os.path.isfile(path):
+            continue
+        with open(path, "rt") as file:
+            value = ""
+            for line in file:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    value = line
+                    break
+        if value:
+            print(f"Protobuf version from {path}: {value}")
+            return value
+    return None
+
+
 def _proto_ver_generator(target, source, env):
     target_file = target[0]
     src_dir = source[0].dir.abspath
 
     def fetch(unshallow=False):
-        git_args = ["fetch", "--tags"]
+        git_args = [
+            "-c",
+            "http.https://github.com/.extraheader=",
+            "fetch",
+            "--tags",
+        ]
         if unshallow:
             git_args.append("--unshallow")
+        try:
+            origin = _anonymous_github_url(
+                __invoke_git(["remote", "get-url", "origin"], source_dir=src_dir)
+            )
+            if origin:
+                git_args.append(origin)
+        except (subprocess.CalledProcessError, EnvironmentError):
+            pass
 
         try:
             __invoke_git(git_args, source_dir=src_dir)
@@ -101,11 +155,15 @@ def _proto_ver_generator(target, source, env):
         except (subprocess.CalledProcessError, EnvironmentError):
             return None
 
-    fetch()
     git_describe = describe()
+    if not git_describe:
+        fetch()
+        git_describe = describe()
     if not git_describe:
         fetch(unshallow=True)
         git_describe = describe()
+    if not git_describe:
+        git_describe = _proto_ver_fallback(src_dir, env)
 
     if not git_describe:
         raise StopError("Failed to process git tags for protobuf versioning")

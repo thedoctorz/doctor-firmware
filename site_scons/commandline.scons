@@ -242,7 +242,6 @@ vars.AddVariables(
             ("applications/main", True),
             ("applications/settings", False),
             ("applications/system", False),
-            ("applications/debug", False),
             ("applications/examples", False),
             ("applications/drivers", False),
             ("applications_user", False),
@@ -259,6 +258,15 @@ vars.AddVariables(
         " This will also create a C define FW_ORIGIN_<origin> so that "
         " app can check what version it is being built for.",
         "Official",
+    ),
+    (
+        "CATALOG_API_VERSION",
+        "SDK API version to advertise to the mobile app and to the official app "
+        "catalog, as 'major.minor'. The catalog only accepts API versions from "
+        "official releases, so a fork's own API version makes the Apps tab report "
+        "an incompatible firmware. .faps built for this API version are accepted "
+        "by the app loader as well. Empty to advertise the real API version.",
+        "",
     ),
     (
         "FLIP_PORT",

@@ -23,20 +23,6 @@ typedef enum {
     FavoriteAppNumber,
 } FavoriteAppShortcut;
 
-typedef enum {
-    DummyAppLeftShort,
-    DummyAppLeftLong,
-    DummyAppRightShort,
-    DummyAppRightLong,
-    DummyAppUpLong,
-    DummyAppDownShort,
-    DummyAppDownLong,
-    DummyAppOkShort,
-    DummyAppOkLong,
-
-    DummyAppNumber,
-} DummyAppShortcut;
-
 typedef struct {
     char name_or_path[128];
 } FavoriteApp;
@@ -45,10 +31,8 @@ typedef struct {
     uint32_t auto_lock_delay_ms;
     uint8_t usb_inhibit_auto_lock;
     uint8_t displayBatteryPercentage;
-    uint8_t dummy_mode;
     uint8_t display_clock;
     FavoriteApp favorite_apps[FavoriteAppNumber];
-    FavoriteApp dummy_apps[DummyAppNumber];
     char menu_style[32];
 } DesktopSettings;
 

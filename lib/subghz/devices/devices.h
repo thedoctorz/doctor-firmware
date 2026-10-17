@@ -42,10 +42,32 @@ void subghz_devices_stop_async_rx(const SubGhzDevice* device);
 float subghz_devices_get_rssi(const SubGhzDevice* device);
 uint8_t subghz_devices_get_lqi(const SubGhzDevice* device);
 
+int8_t subghz_devices_get_freq_est(const SubGhzDevice* device);
+
+uint32_t subghz_devices_rssi_burst(
+    const SubGhzDevice* device,
+    uint8_t* out,
+    size_t count,
+    uint32_t period_us);
+bool subghz_devices_rssi_burst_is_supported(const SubGhzDevice* device);
+
 bool subghz_devices_rx_pipe_not_empty(const SubGhzDevice* device);
 bool subghz_devices_is_rx_data_crc_valid(const SubGhzDevice* device);
 void subghz_devices_read_packet(const SubGhzDevice* device, uint8_t* data, uint8_t* size);
 void subghz_devices_write_packet(const SubGhzDevice* device, const uint8_t* data, uint8_t size);
+
+bool subghz_devices_hop_is_supported(const SubGhzDevice* device);
+
+bool subghz_devices_hop_begin(const SubGhzDevice* device);
+bool subghz_devices_hop_prepare(const SubGhzDevice* device, uint32_t frequency);
+bool subghz_devices_hop_goto(
+    const SubGhzDevice* device,
+    uint32_t frequency,
+    const uint8_t* preset_data);
+void subghz_devices_hop_resume(const SubGhzDevice* device);
+void subghz_devices_hop_end(const SubGhzDevice* device);
+bool subghz_devices_hop_read_image(const SubGhzDevice* device, uint8_t* out);
+bool subghz_devices_hop_get_shadow(const SubGhzDevice* device, uint8_t* out);
 
 #ifdef __cplusplus
 }

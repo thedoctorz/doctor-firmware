@@ -6,21 +6,11 @@ typedef enum {
     DesktopMainEventOpenArchive,
     DesktopMainEventOpenFavoriteLeftShort,
     DesktopMainEventOpenFavoriteLeftLong,
-    DesktopMainEventOpenFavoriteRightShort,
     DesktopMainEventOpenFavoriteRightLong,
     DesktopMainEventOpenFavoriteOkLong,
     DesktopMainEventOpenMenu,
     DesktopMainEventOpenDebug,
     DesktopMainEventOpenPowerOff,
-
-    DesktopDummyEventOpenLeft,
-    DesktopDummyEventOpenDown,
-    DesktopDummyEventOpenOk,
-    DesktopDummyEventOpenUpLong,
-    DesktopDummyEventOpenDownLong,
-    DesktopDummyEventOpenLeftLong,
-    DesktopDummyEventOpenRightLong,
-    DesktopDummyEventOpenOkLong,
 
     DesktopLockedEventUnlocked,
     DesktopLockedEventUpdate,
@@ -37,19 +27,8 @@ typedef enum {
     DesktopDebugEventToggleDebugMode,
     DesktopDebugEventExit,
 
-    //DesktopLockMenuEventLock,
-    DesktopLockMenuEventBt,
-    DesktopLockMenuEventDummyModeOn,
-    DesktopLockMenuEventDummyModeOff,
     DesktopLockMenuEventStealthModeOn,
     DesktopLockMenuEventStealthModeOff,
-    DesktopLockMenuEventOpenQuickSettings,
-
-    DesktopQuickSettingsEventBrightnessChanged,
-    DesktopQuickSettingsEventVolumeChanged,
-    DesktopQuickSettingsEventVibroChanged,
-    DesktopQuickSettingsEventSave,
-    DesktopQuickSettingsEventClose,
 
     DesktopAnimationEventCheckAnimation,
     DesktopAnimationEventNewIdleAnimation,
@@ -69,4 +48,14 @@ typedef enum {
     DesktopGlobalApiUnlock,
     DesktopGlobalSaveSettings,
     DesktopGlobalReloadSettings,
+
+    DesktopLockMenuEventSettings,
+    DesktopLockMenuEventLockKeypad,
+    DesktopLockMenuEventScreenSettings,
+
+    // USB mass-storage prompt (shown on host connect while at desktop)
+    DesktopGlobalUsbMountPrompt,
+    DesktopUsbMountEventEnable,
+    DesktopUsbMountEventCancel,
+    DesktopUsbMountEventDisconnected,
 } DesktopEvent;

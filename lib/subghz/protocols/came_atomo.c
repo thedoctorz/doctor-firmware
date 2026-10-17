@@ -246,7 +246,7 @@ static void subghz_protocol_encoder_came_atomo_get_upload(
     }
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(btn);
     }
 
@@ -651,7 +651,7 @@ static uint64_t subghz_protocol_came_atomo_remote_controller(SubGhzBlockGeneric*
     instance->data_2 = (uint64_t)hi << 32 | lo;
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
     subghz_custom_btn_set_max(4);

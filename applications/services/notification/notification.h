@@ -108,6 +108,14 @@ void notification_internal_message_block(
     NotificationApp* app,
     const NotificationSequence* sequence);
 
+/**
+ * @brief Get the configured display backlight auto-off delay.
+ *
+ * @param app notification record content
+ * @return delay in milliseconds, 0 if the backlight never turns off
+ */
+uint32_t notification_get_display_off_delay_ms(NotificationApp* app);
+
 #ifdef __cplusplus
 }
 #endif

@@ -77,8 +77,7 @@ void* subghz_protocol_encoder_elplast_alloc(SubGhzEnvironment* environment) {
 
 /**
  * Generating an upload from data.
- * @param context Pointer to a SubGhzProtocolEncoderElplast instance
- * @return true Always; this encoder has no failure path
+ * @param instance Pointer to a SubGhzProtocolEncoderElplast instance
  */
 static bool subghz_protocol_encoder_elplast_get_upload(void* context) {
     SubGhzProtocolEncoderElplast* instance = context;

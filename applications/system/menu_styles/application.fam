@@ -1,6 +1,3 @@
-# Each appid must start with "menu_style_": fbt names the .fal after it, and Settings uses that
-# prefix to tell menu styles apart from every other loader plugin in the same directory.
-
 App(
     appid="menu_style_ps4",
     name="PS4",
@@ -64,7 +61,6 @@ App(
     sources=["vertical.c"],
 )
 
-
 App(
     appid="menu_style_grid",
     name="Grid",
@@ -72,22 +68,4 @@ App(
     entry_point="menu_style_grid_ep",
     requires=["loader"],
     sources=["grid.c"],
-)
-
-App(
-    appid="menu_style_macintosh",
-    name="Macintosh",
-    apptype=FlipperAppType.PLUGIN,
-    entry_point="menu_style_macintosh_ep",
-    requires=["loader"],
-    sources=["macintosh.c"],
-)
-
-App(
-    appid="menu_style_3d",
-    name="3D",
-    apptype=FlipperAppType.PLUGIN,
-    entry_point="menu_style_3d_ep",
-    requires=["loader"],
-    sources=["three_d.c"],
 )

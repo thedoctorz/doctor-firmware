@@ -9,7 +9,6 @@
 #include "views/desktop_view_locked.h"
 #include "views/desktop_view_main.h"
 #include "views/desktop_view_lock_menu.h"
-#include "views/desktop_view_quick_settings.h"
 #include "views/desktop_view_debug.h"
 #include "views/desktop_view_slideshow.h"
 
@@ -17,6 +16,7 @@
 #include <gui/view_stack.h>
 #include <gui/view_dispatcher.h>
 #include <gui/modules/popup.h>
+#include <gui/modules/dialog_ex.h>
 #include <gui/scene_manager.h>
 
 #include <loader/loader.h>
@@ -27,13 +27,13 @@
 typedef enum {
     DesktopViewIdMain,
     DesktopViewIdLockMenu,
-    DesktopViewIdQuickSettings,
     DesktopViewIdLocked,
     DesktopViewIdDebug,
     DesktopViewIdPopup,
     DesktopViewIdPinInput,
     DesktopViewIdPinTimeout,
     DesktopViewIdSlideshow,
+    DesktopViewIdUsbMount,
     DesktopViewIdTotal,
 } DesktopViewId;
 
@@ -51,8 +51,8 @@ struct Desktop {
     SceneManager* scene_manager;
 
     Popup* popup;
+    DialogEx* usb_mount_dialog;
     DesktopLockMenuView* lock_menu;
-    DesktopQuickSettingsView* quick_settings;
     DesktopDebugView* debug_view;
     DesktopViewLocked* locked_view;
     DesktopMainView* main_view;
@@ -64,7 +64,6 @@ struct Desktop {
     ViewStack* locked_view_stack;
 
     ViewPort* lock_icon_viewport;
-    ViewPort* dummy_mode_icon_viewport;
     ViewPort* clock_viewport;
     ViewPort* stealth_mode_icon_viewport;
 
@@ -88,9 +87,12 @@ struct Desktop {
     bool in_transition;
     bool app_running;
     bool locked;
+
+    // USB mass-storage prompt state.
+    volatile bool usb_host_connected;
+    bool usb_msc_prompt_shown;
 };
 
 void desktop_lock(Desktop* desktop);
 void desktop_unlock(Desktop* desktop);
-void desktop_set_dummy_mode_state(Desktop* desktop, bool enabled);
 void desktop_set_stealth_mode_state(Desktop* desktop, bool enabled);

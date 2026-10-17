@@ -1,5 +1,6 @@
 #include "text_input.h"
 #include <gui/elements.h>
+#include <gui/remote_keyboard.h>
 #include <assets_icons.h>
 #include <furi.h>
 
@@ -147,6 +148,40 @@ static char char_to_uppercase(const char letter) {
     } else {
         return letter;
     }
+}
+
+static bool text_input_char_allowed(char c) {
+    if(c >= 'a' && c <= 'z') return true;
+    if(c >= 'A' && c <= 'Z') return true;
+    if(c >= '0' && c <= '9') return true;
+    return c == ' ' || c == '_';
+}
+
+static void text_input_insert_one(TextInputModel* model, char selected) {
+    if(model->text_buffer == NULL || model->text_buffer_size < 2) return;
+    if(!text_input_char_allowed(selected)) return;
+    if(model->clear_default_text) {
+        model->text_buffer[0] = selected;
+        model->text_buffer[1] = '\0';
+        model->cursor_pos = 1;
+        model->clear_default_text = false;
+        return;
+    }
+    size_t text_length = strlen(model->text_buffer);
+    if(model->cursor_pos > text_length) model->cursor_pos = text_length;
+    if(text_length >= model->text_buffer_size - 1) return;
+    char* move = model->text_buffer + model->cursor_pos;
+    memmove(move + 1, move, strlen(move) + 1);
+    model->text_buffer[model->cursor_pos] = selected;
+    model->cursor_pos++;
+}
+
+static void text_input_view_enter(void* context) {
+    remote_keyboard_acquire_text(context);
+}
+
+static void text_input_view_exit(void* context) {
+    remote_keyboard_release_text(context);
 }
 
 static void text_input_backspace_cb(TextInputModel* model) {
@@ -505,6 +540,8 @@ TextInput* text_input_alloc(void) {
     view_allocate_model(text_input->view, ViewModelTypeLocking, sizeof(TextInputModel));
     view_set_draw_callback(text_input->view, text_input_view_draw_callback);
     view_set_input_callback(text_input->view, text_input_view_input_callback);
+    view_set_enter_callback(text_input->view, text_input_view_enter);
+    view_set_exit_callback(text_input->view, text_input_view_exit);
 
     text_input->timer = furi_timer_alloc(text_input_timer_callback, FuriTimerTypeOnce, text_input);
 
@@ -524,8 +561,51 @@ TextInput* text_input_alloc(void) {
     return text_input;
 }
 
+bool text_input_remote_insert(TextInput* text_input, const char* text) {
+    furi_check(text_input);
+    if(text == NULL) text = "";
+    with_view_model(
+        text_input->view,
+        TextInputModel * model,
+        {
+            for(const char* cursor = text; *cursor != '\0'; cursor++) {
+                text_input_insert_one(model, *cursor);
+            }
+        },
+        true);
+    return true;
+}
+
+bool text_input_remote_backspace(TextInput* text_input) {
+    furi_check(text_input);
+    with_view_model(
+        text_input->view, TextInputModel * model, { text_input_backspace_cb(model); }, true);
+    return true;
+}
+
+bool text_input_remote_submit(TextInput* text_input) {
+    furi_check(text_input);
+    with_view_model(
+        text_input->view,
+        TextInputModel * model,
+        {
+            size_t text_length = model->text_buffer ? strlen(model->text_buffer) : 0;
+            if(model->validator_callback &&
+               (!model->validator_callback(
+                   model->text_buffer, model->validator_text, model->validator_callback_context))) {
+                model->validator_message_visible = true;
+                furi_timer_start(text_input->timer, furi_kernel_get_tick_frequency() * 4);
+            } else if(model->callback != NULL && text_length >= model->minimum_length) {
+                model->callback(model->callback_context);
+            }
+        },
+        true);
+    return true;
+}
+
 void text_input_free(TextInput* text_input) {
     furi_check(text_input);
+    remote_keyboard_release_text(text_input);
     with_view_model(
         text_input->view,
         TextInputModel * model,

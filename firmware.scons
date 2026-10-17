@@ -100,6 +100,26 @@ else:
     )
 env.AppendUnique(CPPDEFINES=["FW_CFG_${FIRMWARE_APP_SET}"])
 
+# API version advertised to the mobile app & the official app catalog instead of
+# the real one, and additionally accepted by the app loader. Left undefined when
+# CATALOG_API_VERSION is empty, so that stock builds keep api_symbols.csv as the
+# single source of truth for the API version.
+if env["CATALOG_API_VERSION"]:
+    catalog_api_version = env.subst("${CATALOG_API_VERSION}").split(".")
+    if len(catalog_api_version) != 2 or not all(
+        part.isdigit() for part in catalog_api_version
+    ):
+        raise UserError(
+            "CATALOG_API_VERSION must be a 'major.minor' version number, "
+            f"got '{env.subst('${CATALOG_API_VERSION}')}'"
+        )
+    env.AppendUnique(
+        CPPDEFINES=[
+            ("FAP_API_COMPAT_VERSION_MAJOR", catalog_api_version[0]),
+            ("FAP_API_COMPAT_VERSION_MINOR", catalog_api_version[1]),
+        ]
+    )
+
 env.ConfigureForTarget(env.subst("${TARGET_HW}"))
 
 Export("env")

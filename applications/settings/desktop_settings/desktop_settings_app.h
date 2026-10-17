@@ -12,6 +12,7 @@
 #include <assets_icons.h>
 
 #include <desktop/desktop_settings.h>
+#include <loader/main_menu_apps.h>
 #include <desktop/views/desktop_view_pin_input.h>
 #include "views/desktop_settings_view_pin_setup_howto.h"
 #include "views/desktop_settings_view_pin_setup_howto2.h"
@@ -39,6 +40,7 @@ typedef struct {
     DesktopSettingsMenuStyleEntry* menu_styles;
     size_t menu_styles_count;
     bool menu_styles_loaded;
+    MainMenuApps* main_menu_apps;
 
     Gui* gui;
     DialogsApp* dialogs;
@@ -63,12 +65,4 @@ typedef struct {
     uint32_t pin_menu_idx;
 } DesktopSettingsApp;
 
-/** Scan the loader plugin directory into app->menu_styles, replacing whatever is there - a scan
- * that fails leaves the list empty.
- *
- * Costs an SD manifest read per plugin, so the caller should have something on screen first.
- * Sets menu_styles_loaded only when the directory was read through to the end, so that a scan cut
- * short - nothing there to look at, or a card removed part way - is retried on the next call
- * rather than remembered.
- */
 void desktop_settings_menu_styles_load(DesktopSettingsApp* app);

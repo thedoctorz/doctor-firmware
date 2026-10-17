@@ -128,8 +128,6 @@ static void infrared_scene_universal_common_handle_popup_input(
     case InfraredProgressViewInputSave: {
         InfraredSceneState scene_state = {
             .packed_value = scene_manager_get_scene_state(scene_manager, scene_id)};
-        // Copy the signal and its name out before leaving: the brute force owns the open
-        // database file, and it is torn down on the way to the save menu.
         if(infrared_brute_force_load_signal(
                brute_force, scene_state.signal_index, infrared->current_signal)) {
             infrared_text_store_set(

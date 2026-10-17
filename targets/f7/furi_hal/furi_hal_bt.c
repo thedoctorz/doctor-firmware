@@ -15,7 +15,7 @@
 
 #include <furi_hal_version.h>
 #include <furi_hal_power.h>
-#include <furi_hal_bus.h>
+#include <furi_hal_bus.c>
 #include <services/battery_service.h>
 #include <furi.h>
 

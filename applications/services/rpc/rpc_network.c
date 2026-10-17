@@ -190,7 +190,7 @@ void* rpc_network_alloc(RpcSession* session) {
     RpcNetwork* rpc_network = malloc(sizeof(RpcNetwork));
     rpc_network->session = session;
     rpc_network->network = furi_record_open(RECORD_NETWORK);
-    rpc_network->request = malloc(sizeof(PB_Main));
+    rpc_network->request = rpc_message_alloc();
 
     RpcHandler rpc_handler = {
         .message_handler = NULL,

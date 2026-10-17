@@ -26,10 +26,10 @@ static void bt_draw_statusbar_callback(Canvas* canvas, void* context) {
         canvas_draw_icon(canvas, 0, 0, &I_BLE_beacon_7x8);
         draw_offset += icon_get_width(&I_BLE_beacon_7x8) + ICON_SPACER;
     }
-    if(bt->status == BtStatusAdvertising) {
-        canvas_draw_icon(canvas, draw_offset, 0, &I_Bluetooth_Idle_5x8);
-    } else if(bt->status == BtStatusConnected) {
+    if(bt->status == BtStatusConnected || bt->central_active) {
         canvas_draw_icon(canvas, draw_offset, 0, &I_Bluetooth_Connected_16x8);
+    } else if(bt->status == BtStatusAdvertising) {
+        canvas_draw_icon(canvas, draw_offset, 0, &I_Bluetooth_Idle_5x8);
     }
 }
 
@@ -205,6 +205,8 @@ static uint16_t bt_serial_event_callback(SerialServiceEvent event, void* context
                 TAG, "Only %zu of %u bytes processed by RPC", bytes_processed, event.data.size);
         }
         ret = rpc_session_get_available_size(bt->rpc_session);
+    } else if(event.event == SerialServiceEventTypeQueryAvailable) {
+        if(bt->rpc_session) ret = rpc_session_get_available_size(bt->rpc_session);
     } else if(event.event == SerialServiceEventTypeDataSent) {
         furi_event_flag_set(bt->rpc_event, BT_RPC_EVENT_BUFF_SENT);
     } else if(event.event == SerialServiceEventTypesBleResetRequest) {
@@ -256,7 +258,8 @@ static void bt_serial_buffer_is_empty_callback(void* context) {
     furi_assert(context);
     Bt* bt = context;
     furi_check(furi_hal_bt_check_profile_type(bt->current_profile, ble_profile_serial));
-    ble_profile_serial_notify_buffer_is_empty(bt->current_profile);
+    ble_profile_serial_notify_credits(
+        bt->current_profile, rpc_session_get_available_size(bt->rpc_session));
 }
 
 // Called from GAP thread
@@ -349,10 +352,10 @@ static void bt_statusbar_update(Bt* bt) {
     if(bt->beacon_active) {
         active_icon_width = icon_get_width(&I_BLE_beacon_7x8) + ICON_SPACER;
     }
-    if(bt->status == BtStatusAdvertising) {
-        active_icon_width += icon_get_width(&I_Bluetooth_Idle_5x8);
-    } else if(bt->status == BtStatusConnected) {
+    if(bt->status == BtStatusConnected || bt->central_active) {
         active_icon_width += icon_get_width(&I_Bluetooth_Connected_16x8);
+    } else if(bt->status == BtStatusAdvertising) {
+        active_icon_width += icon_get_width(&I_Bluetooth_Idle_5x8);
     }
 
     if(active_icon_width > 0) {
@@ -597,6 +600,9 @@ int32_t bt_srv(void* p) {
             bt_handle_set_settings(bt, &message);
         } else if(message.type == BtMessageTypeReloadKeysSettings) {
             bt_handle_reload_keys_settings(bt);
+        } else if(message.type == BtMessageTypeSetCentralActive) {
+            bt->central_active = message.data.central_active;
+            bt_statusbar_update(bt);
         }
 
         if(message.lock) api_lock_unlock(message.lock);

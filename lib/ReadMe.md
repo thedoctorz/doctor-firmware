@@ -14,7 +14,6 @@
 - `FreeRTOS-glue`       - Extra glue to hold together FreeRTOS kernel and flipper firmware
 - `FreeRTOS-Kernel`     - FreeRTOS kernel source code
 - `heatshrink`          - Heatshrink compression library
-- `ibutton`             - ibutton library, used by iButton application
 - `infrared`            - Infrared library, used by Infrared application
 - `lfrfid`              - LF-RFID library, used by LF RFID application
 - `libusb_stm32`        - LibUSB for STM32 series MCU
@@ -25,7 +24,6 @@
 - `music_worker`        - MusicWorker library for playing midi and RTTTL files
 - `nanopb`              - NanoPB library, protobuf implementation for MCU
 - `nfc`                 - NFC library, used by NFC application
-- `one_wire`            - OneWire library, used by iButton application
 - `print`               - Tiny printf implementation
 - `digital_signal`      - Digital Signal library used by NFC for software implemented protocols
 - `pulse_reader`        - Pulse Reader library used by NFC for software implemented protocols

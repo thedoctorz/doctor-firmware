@@ -1,5 +1,6 @@
 #include "rpc_i.h"
 #include <gui/gui_i.h>
+#include <gui/remote_keyboard.h>
 #include <assets_icons.h>
 
 #include <flipper.pb.h>
@@ -39,6 +40,13 @@ _Static_assert(
 _Static_assert(
     InputTypeRepeat == (int32_t)PB_Gui_InputType_REPEAT,
     "InputTypeRepeat != PB_Gui_InputType_REPEAT");
+
+_Static_assert(RemoteKeyboardNone == (int32_t)PB_Gui_InputFocusKind_NONE, "RemoteKeyboardNone");
+_Static_assert(RemoteKeyboardText == (int32_t)PB_Gui_InputFocusKind_TEXT, "RemoteKeyboardText");
+_Static_assert(RemoteKeyboardByte == (int32_t)PB_Gui_InputFocusKind_BYTE, "RemoteKeyboardByte");
+_Static_assert(
+    RemoteKeyboardNumber == (int32_t)PB_Gui_InputFocusKind_NUMBER,
+    "RemoteKeyboardNumber");
 
 #define TAG "RpcGui"
 
@@ -81,6 +89,8 @@ static const PB_Gui_ScreenOrientation rpc_system_gui_screen_orientation_map[] = 
     [CanvasOrientationVerticalFlip] = PB_Gui_ScreenOrientation_VERTICAL_FLIP,
 };
 
+static void rpc_system_gui_emit_focus(RpcGuiSystem* rpc_gui, RemoteKeyboardKind kind);
+
 static void rpc_system_gui_screen_stream_frame_callback(
     uint8_t* data,
     size_t size,
@@ -116,10 +126,12 @@ static int32_t rpc_system_gui_screen_stream_frame_transmit_thread(void* context)
             rpc_send(rpc_gui->session, rpc_gui->transmit_frame);
             transmit_time = furi_get_tick() - transmit_time;
 
-            // Guaranteed bandwidth reserve
-            uint32_t extra_delay = transmit_time / 20;
-            if(extra_delay > 500) extra_delay = 500;
-            if(extra_delay) furi_delay_tick(extra_delay);
+            // Leave a little headroom on USB; BLE is already credit-limited
+            if(rpc_session_get_owner(rpc_gui->session) != RpcOwnerBle) {
+                uint32_t extra_delay = transmit_time / 20;
+                if(extra_delay > 500) extra_delay = 500;
+                if(extra_delay) furi_delay_tick(extra_delay);
+            }
         }
 
         if(flags & RpcGuiWorkerFlagExit) {
@@ -149,7 +161,7 @@ static void rpc_system_gui_start_screen_stream_process(const PB_Main* request, v
         rpc_gui->is_streaming = true;
         size_t framebuffer_size = gui_get_framebuffer_size(rpc_gui->gui);
         // Reusable Frame
-        rpc_gui->transmit_frame = malloc(sizeof(PB_Main));
+        rpc_gui->transmit_frame = rpc_message_alloc();
         rpc_gui->transmit_frame->which_content = PB_Main_gui_screen_frame_tag;
         rpc_gui->transmit_frame->command_status = PB_CommandStatus_OK;
         rpc_gui->transmit_frame->content.gui_screen_frame.data =
@@ -162,6 +174,7 @@ static void rpc_system_gui_start_screen_stream_process(const PB_Main* request, v
         // GUI framebuffer callback
         gui_add_framebuffer_callback(
             rpc_gui->gui, rpc_system_gui_screen_stream_frame_callback, context);
+        rpc_system_gui_emit_focus(rpc_gui, remote_keyboard_kind());
     }
 }
 
@@ -239,6 +252,52 @@ static void
     rpc_send_and_release_empty(session, request->command_id, PB_CommandStatus_OK);
 }
 
+static void rpc_system_gui_emit_focus(RpcGuiSystem* rpc_gui, RemoteKeyboardKind kind) {
+    PB_Main* message = rpc_message_alloc();
+    message->command_id = 0;
+    message->command_status = PB_CommandStatus_OK;
+    message->has_next = false;
+    message->which_content = PB_Main_gui_input_focus_tag;
+    message->content.gui_input_focus.kind = (PB_Gui_InputFocusKind)kind;
+    rpc_send_and_release(rpc_gui->session, message);
+    free(message);
+}
+
+static void rpc_system_gui_focus_callback(RemoteKeyboardKind kind, void* context) {
+    rpc_system_gui_emit_focus(context, kind);
+}
+
+static void rpc_system_gui_send_text_request_process(const PB_Main* request, void* context) {
+    furi_assert(request);
+    furi_assert(request->which_content == PB_Main_gui_send_text_request_tag);
+    furi_assert(context);
+
+    RpcGuiSystem* rpc_gui = context;
+    RpcSession* session = rpc_gui->session;
+    const PB_Gui_SendTextRequest* text = &request->content.gui_send_text_request;
+    const char* chars = text->text == NULL ? "" : text->text;
+    bool ok = false;
+
+    switch(text->action) {
+    case PB_Gui_TextAction_INSERT:
+        ok = remote_keyboard_insert(chars);
+        break;
+    case PB_Gui_TextAction_BACKSPACE:
+        ok = remote_keyboard_backspace();
+        break;
+    case PB_Gui_TextAction_SUBMIT:
+        ok = remote_keyboard_submit();
+        break;
+    default:
+        break;
+    }
+
+    rpc_send_and_release_empty(
+        session,
+        request->command_id,
+        ok ? PB_CommandStatus_OK : PB_CommandStatus_ERROR_INVALID_PARAMETERS);
+}
+
 static void rpc_system_gui_virtual_display_render_callback(Canvas* canvas, void* context) {
     furi_assert(canvas);
     furi_assert(context);
@@ -266,16 +325,16 @@ static void rpc_system_gui_virtual_display_input_callback(InputEvent* event, voi
 
     FURI_LOG_D(TAG, "VirtualDisplay: SendInputEvent");
 
-    PB_Main rpc_message = {
-        .command_id = 0,
-        .command_status = PB_CommandStatus_OK,
-        .has_next = false,
-        .which_content = PB_Main_gui_send_input_event_request_tag,
-        .content.gui_send_input_event_request.key = (int32_t)event->key,
-        .content.gui_send_input_event_request.type = (int32_t)event->type,
-    };
+    PB_Main* rpc_message = rpc_message_alloc();
+    rpc_message->command_id = 0;
+    rpc_message->command_status = PB_CommandStatus_OK;
+    rpc_message->has_next = false;
+    rpc_message->which_content = PB_Main_gui_send_input_event_request_tag;
+    rpc_message->content.gui_send_input_event_request.key = (int32_t)event->key;
+    rpc_message->content.gui_send_input_event_request.type = (int32_t)event->type;
 
-    rpc_send_and_release(session, &rpc_message);
+    rpc_send_and_release(session, rpc_message);
+    free(rpc_message);
 }
 
 static void rpc_system_gui_start_virtual_display_process(const PB_Main* request, void* context) {
@@ -429,6 +488,11 @@ void* rpc_system_gui_alloc(RpcSession* session) {
     rpc_handler.message_handler = rpc_system_gui_send_input_event_request_process;
     rpc_add_handler(session, PB_Main_gui_send_input_event_request_tag, &rpc_handler);
 
+    rpc_handler.message_handler = rpc_system_gui_send_text_request_process;
+    rpc_add_handler(session, PB_Main_gui_send_text_request_tag, &rpc_handler);
+
+    remote_keyboard_add_focus_callback(rpc_system_gui_focus_callback, rpc_gui);
+
     rpc_handler.message_handler = rpc_system_gui_start_virtual_display_process;
     rpc_add_handler(session, PB_Main_gui_start_virtual_display_request_tag, &rpc_handler);
 
@@ -445,6 +509,8 @@ void rpc_system_gui_free(void* context) {
     furi_assert(context);
     RpcGuiSystem* rpc_gui = context;
     furi_assert(rpc_gui->gui);
+
+    remote_keyboard_remove_focus_callback(rpc_system_gui_focus_callback, rpc_gui);
 
     // Release ongoing inputs to avoid lockup
     for(InputKey key = 0; key < InputKeyMAX; key++) {

@@ -116,6 +116,36 @@ SubGhzTxRxStartTxState subghz_txrx_tx_start(SubGhzTxRx* instance, FlipperFormat*
  */
 void subghz_txrx_rx_start(SubGhzTxRx* instance);
 
+void subghz_txrx_raw_si_gate_set(SubGhzTxRx* instance, bool on);
+
+bool subghz_txrx_raw_si_gate_is_on(SubGhzTxRx* instance);
+
+typedef enum {
+    SubGhzRawAutoAirUnknown = 0,
+    SubGhzRawAutoAirAsk,
+    SubGhzRawAutoAirFsk,
+} SubGhzRawAutoAir;
+
+bool subghz_txrx_raw_auto_available(const char* radio_name);
+
+SubGhzRawAutoAir subghz_txrx_raw_auto_listen(SubGhzTxRx* instance, float arm_level_dbm);
+
+const char* subghz_txrx_raw_auto_capture(
+    SubGhzTxRx* instance,
+    const char* file_name,
+    uint32_t timeout_ms,
+    void (*start_tx)(void* context),
+    void* context,
+    bool* file_error);
+
+/**
+ * Retune RX to a new frequency without reloading the modulation preset.
+ *
+ * @param instance Pointer to a SubGhzTxRx
+ * @param frequency Frequency in Hz
+ */
+void subghz_txrx_rx_retune(SubGhzTxRx* instance, uint32_t frequency);
+
 /**
  * Stop TX/RX CC1101
  * 
@@ -132,16 +162,19 @@ void subghz_txrx_sleep(SubGhzTxRx* instance);
 
 /**
  * Update frequency CC1101 in automatic mode (hopper)
- *
- * Hopping does not check the radio itself - a hop is the hot path, and paying for
- * it once per hop is what that check would cost. Callers must run
- * subghz_txrx_radio_device_poll_active() earlier in the same tick, or an external
- * module that was unplugged will keep being hopped on a dead bus
  * 
  * @param instance Pointer to a SubGhzTxRx
  * @param stay_threshold RSSI theshold over which to stay before hopping
  */
 void subghz_txrx_hopper_update(SubGhzTxRx* instance, float stay_threshold);
+
+bool subghz_txrx_hopper_get_level(SubGhzTxRx* instance, float* rssi, float* floor);
+
+/**
+ * Notify the hopper that a decode has occurred
+ * @param instance Pointer to a SubGhzTxRx
+ */
+void subghz_txrx_hopper_note_decode(SubGhzTxRx* instance);
 
 /**
  * Get state hopper
@@ -172,6 +205,26 @@ void subghz_txrx_hopper_unpause(SubGhzTxRx* instance);
  * @param instance Pointer to a SubGhzTxRx
  */
 void subghz_txrx_hopper_pause(SubGhzTxRx* instance);
+
+SubGhzHopperMode subghz_txrx_hopper_get_mode(SubGhzTxRx* instance);
+
+bool subghz_txrx_hopper_owns_frequency(SubGhzTxRx* instance);
+
+void subghz_txrx_set_frequency(SubGhzTxRx* instance, uint32_t frequency);
+
+uint32_t subghz_txrx_get_frequency_hz(SubGhzTxRx* instance);
+
+void subghz_txrx_hopper_set_mode(SubGhzTxRx* instance, SubGhzHopperMode mode);
+
+void subghz_txrx_hopper_set_presets(SubGhzTxRx* instance, size_t preset_a, size_t preset_b);
+
+void subghz_txrx_hopper_resume(SubGhzTxRx* instance);
+
+void subghz_txrx_hopper_suspend(SubGhzTxRx* instance);
+
+void subghz_txrx_hopper_lock(SubGhzTxRx* instance);
+
+void subghz_txrx_hopper_unlock(SubGhzTxRx* instance);
 
 /**
  * Speaker on
@@ -318,6 +371,8 @@ void subghz_txrx_set_raw_file_encoder_worker_callback_end(
 */
 bool subghz_txrx_radio_device_is_external_connected(SubGhzTxRx* instance, const char* name);
 
+const char* subghz_txrx_radio_device_detect_external(SubGhzTxRx* instance);
+
 /* Set the selected radio device to use
 *
 * @param instance Pointer to a SubGhzTxRx
@@ -327,41 +382,21 @@ bool subghz_txrx_radio_device_is_external_connected(SubGhzTxRx* instance, const 
 SubGhzRadioDeviceType
     subghz_txrx_radio_device_set(SubGhzTxRx* instance, SubGhzRadioDeviceType radio_device_type);
 
-/* Check the external module we are already on and fall back to the internal radio
-* when it stopped answering. Costs a single 2-byte status read when the module is
-* there, and nothing at all on the internal radio, so it is safe on the RX path -
-* including between hops. Does nothing while the radio is running, since swapping
-* devices there would strand the worker on the old one
-*
-* @param instance Pointer to a SubGhzTxRx
-* @return bool True if the radio device changed, and the screen has to be redrawn
-*/
-bool subghz_txrx_radio_device_poll(SubGhzTxRx* instance);
-
-/* Same, and additionally searches for a module that was not attached last time we
-* looked. That search power-cycles the OTG rail and runs out the driver's own bus
-* timeout - a few hundred ms with the radio stopped - so it is rate-limited and
-* belongs only where a stall cannot cost reception, i.e. the Sub-GHz menu
-*
-* @param instance Pointer to a SubGhzTxRx
-* @return bool True if the radio device changed, and the screen has to be redrawn
-*/
-bool subghz_txrx_radio_device_poll_reacquire(SubGhzTxRx* instance);
-
-/* Same, for a radio that is currently receiving: stops it, re-probes, and starts
-* RX again on whatever answered
-*
-* @param instance Pointer to a SubGhzTxRx
-* @return bool True if the radio device changed, and the screen has to be redrawn
-*/
-bool subghz_txrx_radio_device_poll_active(SubGhzTxRx* instance);
-
 /* Get the selected radio device to use
 *
 * @param instance Pointer to a SubGhzTxRx
 * @return SubGhzRadioDeviceType Type of installed radio device
 */
 SubGhzRadioDeviceType subghz_txrx_radio_device_get(SubGhzTxRx* instance);
+
+/** The radio currently selected, for helpers that drive the device directly
+ * rather than through TxRx - the Auto Tune worker owns the radio for the
+ * lifetime of its scene.
+ *
+ * @param instance Pointer to a SubGhzTxRx instance
+ * @return Pointer to the active SubGhzDevice
+ */
+const SubGhzDevice* subghz_txrx_radio_device_get_ptr(SubGhzTxRx* instance);
 
 /* Get RSSI the selected radio device to use
 *
@@ -384,6 +419,16 @@ const char* subghz_txrx_radio_device_get_name(SubGhzTxRx* instance);
 */
 bool subghz_txrx_radio_device_is_frequency_valid(SubGhzTxRx* instance, uint32_t frequency);
 
+bool subghz_txrx_preset_fits_radio(SubGhzTxRx* instance, size_t preset_idx);
+
+uint8_t subghz_txrx_preset_make_valid(SubGhzTxRx* instance, uint8_t tx_power);
+
+#define SUBGHZ_TXRX_FALLBACK_FREQUENCY 433920000UL
+
+size_t subghz_txrx_frequency_valid_index(SubGhzTxRx* instance, size_t index, bool next);
+
+uint32_t subghz_txrx_frequency_make_valid(SubGhzTxRx* instance, uint32_t frequency);
+
 bool subghz_txrx_radio_device_is_tx_allowed(SubGhzTxRx* instance, uint32_t frequency);
 
 void subghz_txrx_set_debug_pin_state(SubGhzTxRx* instance, bool state);
@@ -393,24 +438,7 @@ void subghz_txrx_reset_dynamic_and_custom_btns(SubGhzTxRx* instance);
 
 SubGhzReceiver* subghz_txrx_get_receiver(SubGhzTxRx* instance); // TODO use only in DecodeRaw
 
-/** Feed one sample to the decoders and count it against the air-time clock
- *
- * @param instance Pointer to a SubGhzTxRx
- * @param level Sample level
- * @param duration Sample duration, us
- */
-void subghz_txrx_decode(SubGhzTxRx* instance, bool level, uint32_t duration);
-
-/** Get the total air decoded so far
- *
- * Only advances while samples are being handed to the decoders, so the
- * difference between two readings is the air between two decoded frames and not
- * the wall time between the moments the app was told about them
- *
- * @param instance Pointer to a SubGhzTxRx
- * @return Air time, ms
- */
-uint32_t subghz_txrx_get_air_time_ms(SubGhzTxRx* instance);
+SubGhzEnvironment* subghz_txrx_get_environment(SubGhzTxRx* instance);
 
 /**
  * @brief Set current preset AM650 without additional params
@@ -434,6 +462,100 @@ const char* subghz_txrx_set_preset_internal(
     uint32_t frequency,
     uint8_t index,
     uint8_t tx_power);
+
+/**
+ * @brief Set the internal-radio preset used by dual RX (persists for session).
+ */
+void subghz_txrx_dual_set_preset_int(
+    SubGhzTxRx* instance,
+    const char* preset_name,
+    uint32_t frequency);
+
+/**
+ * @brief Set the external-radio preset used by dual RX (persists for session).
+ */
+void subghz_txrx_dual_set_preset_ext(
+    SubGhzTxRx* instance,
+    const char* preset_name,
+    uint32_t frequency);
+
+/** @brief Get a copy of the internal-radio dual preset. */
+SubGhzRadioPreset subghz_txrx_dual_get_preset_int(SubGhzTxRx* instance);
+
+/** @brief Get a copy of the external-radio dual preset. */
+SubGhzRadioPreset subghz_txrx_dual_get_preset_ext(SubGhzTxRx* instance);
+
+/** @brief Format the "frequency" / "modulation" strings for one dual radio. */
+void subghz_txrx_dual_get_frequency_and_modulation(
+    SubGhzTxRx* instance,
+    bool external,
+    FuriString* frequency,
+    FuriString* modulation,
+    bool long_name);
+
+/**
+ * @brief Start simultaneous RX on both radios using the current dual presets.
+ *        if dual RX is already running it is restarted with the
+ *        current presets.
+ * @return true if both radios started (external requires a connected module).
+ */
+bool subghz_txrx_dual_rx_start(SubGhzTxRx* instance);
+
+/** @brief Stop dual RX and release the external radio + secondary chain. */
+void subghz_txrx_dual_rx_stop(SubGhzTxRx* instance);
+
+/** @brief Whether dual RX is currently running. */
+bool subghz_txrx_dual_is_active(SubGhzTxRx* instance);
+
+/** @brief Whether an external CC1101 module is connected (probes hardware). */
+bool subghz_txrx_dual_is_ext_connected(SubGhzTxRx* instance);
+
+/**
+ * @brief Install per-radio decode callbacks for dual RX.
+ * @param callback_int Called when the internal radio decodes a protocol.
+ * @param callback_ext Called when the external radio decodes a protocol.
+ * @param context Shared context passed to both callbacks.
+ */
+void subghz_txrx_dual_set_rx_callback(
+    SubGhzTxRx* instance,
+    SubGhzReceiverCallback callback_int,
+    SubGhzReceiverCallback callback_ext,
+    void* context);
+
+/** @brief Apply a protocol filter to both dual receivers. */
+void subghz_txrx_dual_set_filter(SubGhzTxRx* instance, SubGhzProtocolFlag filter);
+
+/**
+ * @brief Acquire/release the shared dual decode lock. The decode callbacks run
+ * under this lock, so GUI-thread code must take it before reading or mutating
+ * the shared history while dual RX is running. No-op if dual RX is not active.
+ */
+void subghz_txrx_dual_lock(SubGhzTxRx* instance);
+void subghz_txrx_dual_unlock(SubGhzTxRx* instance);
+
+/** @brief Current RSSI of the internal radio (dual mode). */
+float subghz_txrx_dual_get_rssi_int(SubGhzTxRx* instance);
+
+/** @brief Current RSSI of the external radio (dual mode). */
+float subghz_txrx_dual_get_rssi_ext(SubGhzTxRx* instance);
+
+/**
+ * @brief Look up a decoder on the external receiver by protocol name.
+ */
+SubGhzProtocolDecoderBase*
+    subghz_txrx_dual_get_decoder_ext_by_name(SubGhzTxRx* instance, const char* name_protocol);
+
+/**
+ * Encode key file data to a RAW .sub file.
+ * @param instance Pointer to a SubGhzTxRx
+ * @param flipper_format Pointer to a FlipperFormat with key data
+ * @param file_path Full path to output file
+ * @return true On success
+ */
+bool subghz_txrx_save_raw_from_key(
+    SubGhzTxRx* instance,
+    FlipperFormat* flipper_format,
+    const char* file_path);
 
 #ifdef __cplusplus
 }

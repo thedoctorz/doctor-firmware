@@ -1,12 +1,3 @@
-/*
- * Base64 encoding/decoding (RFC1341)
- * Copyright (c) 2005-2011, Jouni Malinen <j@w1.fi>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
- */
-// https://web.mit.edu/freebsd/head/contrib/wpa/src/utils/base64.c
-
 #include "base64.h"
 
 #define os_malloc malloc
@@ -16,28 +7,16 @@
 static const unsigned char base64_table[65] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/**
- * base64_encode - Base64 encode
- * @src: Data to be encoded
- * @len: Length of the data to be encoded
- * @out_len: Pointer to output length variable, or %NULL if not used
- * Returns: Allocated buffer of out_len bytes of encoded data,
- * or %NULL on failure
- *
- * Caller is responsible for freeing the returned buffer. Returned buffer is
- * nul terminated to make it easier to use as a C string. The nul terminator is
- * not included in out_len.
- */
 unsigned char* base64_encode(const unsigned char* src, size_t len, size_t* out_len) {
     unsigned char *out, *pos;
     const unsigned char *end, *in;
     size_t olen;
     int line_len;
 
-    olen = len * 4 / 3 + 4; /* 3-byte blocks to 4-byte */
-    olen += olen / 72; /* line feeds */
-    olen++; /* nul termination */
-    if(olen < len) return NULL; /* integer overflow */
+    olen = len * 4 / 3 + 4;
+    olen += olen / 72;
+    olen++;
+    if(olen < len) return NULL;
     out = os_malloc(olen);
     if(out == NULL) return NULL;
 
@@ -78,16 +57,6 @@ unsigned char* base64_encode(const unsigned char* src, size_t len, size_t* out_l
     return out;
 }
 
-/**
- * base64_decode - Base64 decode
- * @src: Data to be decoded
- * @len: Length of the data to be decoded
- * @out_len: Pointer to output length variable
- * Returns: Allocated buffer of out_len bytes of decoded data,
- * or %NULL on failure
- *
- * Caller is responsible for freeing the returned buffer.
- */
 unsigned char* base64_decode(const unsigned char* src, size_t len, size_t* out_len) {
     unsigned char dtable[256], *out, *pos, block[4], tmp;
     size_t i, count, olen;
@@ -128,7 +97,6 @@ unsigned char* base64_decode(const unsigned char* src, size_t len, size_t* out_l
                 else if(pad == 2)
                     pos -= 2;
                 else {
-                    /* Invalid padding */
                     os_free(out);
                     return NULL;
                 }

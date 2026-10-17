@@ -17,8 +17,19 @@ App(
     stack_size=3 * 1024,
     order=1,
     resources="resources",
-    # plugins/ ships as .fal - keep it out of the image. Exclusions are leaf names, not paths.
-    sources=["*.c*", "!plugins"],
+    sources=[
+        "*.c*",
+        "!plugins",
+        "!subghz_scene_set_type.c",
+        "!subghz_scene_set_key.c",
+        "!subghz_scene_set_serial.c",
+        "!subghz_scene_set_button.c",
+        "!subghz_scene_set_counter.c",
+        "!subghz_scene_set_seed.c",
+        "!subghz_gen_info.c",
+        "!subghz_txrx_create_protocol_key.c",
+        "!subghz_scene_clean_dupes.c",
+    ],
     fap_libs=["assets", "hwdrivers"],
     fap_icon="icon.png",
     fap_category="Sub-GHz",
@@ -30,7 +41,10 @@ App(
     apptype=FlipperAppType.PLUGIN,
     entry_point="cli_subghz_ep",
     requires=["cli"],
-    sources=["subghz_cli.c", "helpers/subghz_chat.c"],
+    sources=[
+        "subghz_cli.c",
+        "helpers/subghz_chat.c",
+    ],
 )
 
 App(
@@ -41,16 +55,6 @@ App(
     order=650,
 )
 
-# Feature plugins: loaded on demand by the app, so their code is not resident in the firmware.
-App(
-    appid="subghz_add_manually",
-    apptype=FlipperAppType.PLUGIN,
-    targets=["f7"],
-    entry_point="subghz_add_manually_ep",
-    requires=["subghz"],
-    sources=["plugins/add_manually/*.c"],
-)
-
 App(
     appid="subghz_frequency_analyzer",
     apptype=FlipperAppType.PLUGIN,
@@ -58,9 +62,41 @@ App(
     entry_point="subghz_frequency_analyzer_ep",
     requires=["subghz"],
     sources=["plugins/frequency_analyzer/*.c"],
-    # The worker drives the CC1101 registers directly, so hwdrivers puts a second copy of those
-    # 320 bytes in the .fal. Exporting them from the firmware instead would trade SD/RAM bytes
-    # for resident flash, which is the wrong way round here.
+    fap_libs=["assets", "hwdrivers"],
+    fap_exclude_libs=["gcc"],
+)
+
+App(
+    appid="subghz_add_manually",
+    apptype=FlipperAppType.PLUGIN,
+    targets=["f7"],
+    entry_point="subghz_add_manually_ep",
+    requires=["subghz"],
+    sources=[
+        "plugins/add_manually/*.c",
+        "scenes/subghz_scene_set_type.c",
+        "scenes/subghz_scene_set_key.c",
+        "scenes/subghz_scene_set_serial.c",
+        "scenes/subghz_scene_set_button.c",
+        "scenes/subghz_scene_set_counter.c",
+        "scenes/subghz_scene_set_seed.c",
+        "helpers/subghz_gen_info.c",
+        "helpers/subghz_txrx_create_protocol_key.c",
+    ],
+    fap_libs=["assets", "hwdrivers"],
+    fap_exclude_libs=["gcc"],
+)
+
+App(
+    appid="subghz_clean_dupes",
+    apptype=FlipperAppType.PLUGIN,
+    targets=["f7"],
+    entry_point="subghz_clean_dupes_ep",
+    requires=["subghz"],
+    sources=[
+        "plugins/clean_dupes/*.c",
+        "scenes/subghz_scene_clean_dupes.c",
+    ],
     fap_libs=["assets", "hwdrivers"],
     fap_exclude_libs=["gcc"],
 )

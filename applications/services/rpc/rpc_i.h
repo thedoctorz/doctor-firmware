@@ -6,6 +6,7 @@
 #include <pb_encode.h>
 #include <flipper.pb.h>
 #include <toolbox/pipe.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +27,12 @@ void rpc_send(RpcSession* session, PB_Main* main_message);
 void rpc_send_and_release(RpcSession* session, PB_Main* main_message);
 
 void rpc_send_and_release_empty(RpcSession* session, uint32_t command_id, PB_CommandStatus status);
+
+static inline PB_Main* rpc_message_alloc(void) {
+    PB_Main* message = malloc(sizeof(PB_Main));
+    memset(message, 0, sizeof(PB_Main));
+    return message;
+}
 
 void rpc_add_handler(RpcSession* session, pb_size_t message_tag, RpcHandler* handler);
 
@@ -49,6 +56,9 @@ void rpc_gps_free(void* ctx);
 
 void* rpc_network_alloc(RpcSession* session);
 void rpc_network_free(void* ctx);
+
+void* rpc_subghz_alloc(RpcSession* session);
+void rpc_subghz_free(void* ctx);
 
 void rpc_debug_print_message(const PB_Main* message);
 void rpc_debug_print_data(const char* prefix, uint8_t* buffer, size_t size);

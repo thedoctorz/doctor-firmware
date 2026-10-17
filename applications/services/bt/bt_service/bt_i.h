@@ -35,6 +35,7 @@ typedef enum {
     BtMessageTypeGetSettings,
     BtMessageTypeSetSettings,
     BtMessageTypeReloadKeysSettings,
+    BtMessageTypeSetCentralActive,
 } BtMessageType;
 
 typedef struct {
@@ -54,6 +55,7 @@ typedef union {
     BtKeyStorageUpdateData key_storage_data;
     BtSettings* settings;
     const BtSettings* csettings;
+    bool central_active;
 } BtMessageData;
 
 typedef struct {
@@ -72,6 +74,7 @@ struct Bt {
     BtKeysStorage* keys_storage;
     BtStatus status;
     bool beacon_active;
+    bool central_active;
     FuriHalBleProfileBase* current_profile;
     FuriMessageQueue* message_queue;
     NotificationApp* notification;

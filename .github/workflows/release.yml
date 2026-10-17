@@ -1,0 +1,132 @@
+# Publish a GitHub Release when a version tag is pushed.
+# Tag scheme: prefix + hyphen + 3-digit counter.
+#
+#   git tag doctor-001
+#   git push origin doctor-001
+#
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "doctor-*"
+
+permissions:
+  contents: write
+
+env:
+  FBT_NO_SYNC: 0
+  FORCE_NO_DIRTY: "yes"
+  FBT_GIT_SUBMODULE_SHALLOW: 1
+  WORKFLOW_BRANCH_OR_TAG: ${{ github.ref_name }}
+
+jobs:
+  release:
+    name: The Doctor's Firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DIST_SUFFIX: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Init public submodules
+        run: git submodule update --init --recursive
+
+      - name: Cache fbt toolchain
+        uses: actions/cache@v6
+        with:
+          path: toolchain
+          key: fbt-toolchain-${{ runner.os }}-${{ hashFiles('fbt_options.py', 'scripts/toolchain/**') }}
+          restore-keys: |
+            fbt-toolchain-${{ runner.os }}-
+
+      - name: Build updater package
+        run: ./fbt COMPACT=1 DEBUG=0 updater_package
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/f7-C/*.tgz
+            dist/f7-C/*.zip
+            dist/f7-C/*.dfu
+          generate_release_notes: true
+          body: |
+            The Doctor's Firmware `${{ github.ref_name }}`
+
+            Fork of [Unleashed Firmware](https://github.com/DarkFlippers/unleashed-firmware).
+
+            - Default: `flipper-z-f7-update-${{ github.ref_name }}.tgz` (radio tools already in the firmware)
+            - Extra apps: `flipper-z-f7-update-${{ github.ref_name }}e.tgz` (same firmware + [doctor-plugins](https://github.com/thedoctorz/doctor-plugins) pack) — attached when that pack has a release
+
+            Install with qFlipper, the mobile app (custom file), or the Firmware app on the device.
+
+  extra:
+    name: Extra apps package
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DIST_SUFFIX: ${{ github.ref_name }}e
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Init public submodules
+        run: git submodule update --init --recursive
+
+      - name: Download extra pack
+        id: pack
+        run: |
+          URL="https://github.com/thedoctorz/doctor-plugins/releases/latest/download/all-the-apps-extra.tgz"
+          if curl -fL --retry 3 -o /tmp/all-the-apps-extra.tgz "$URL"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No doctor-plugins release yet; skipping e package."
+          fi
+
+      - name: Cache fbt toolchain
+        if: steps.pack.outputs.present == 'true'
+        uses: actions/cache@v6
+        with:
+          path: toolchain
+          key: fbt-toolchain-${{ runner.os }}-${{ hashFiles('fbt_options.py', 'scripts/toolchain/**') }}
+          restore-keys: |
+            fbt-toolchain-${{ runner.os }}-
+
+      - name: Inject extra apps
+        if: steps.pack.outputs.present == 'true'
+        run: |
+          tar zxf /tmp/all-the-apps-extra.tgz
+          mkdir -p applications/main/extra_resources/resources/apps
+          mkdir -p applications/main/extra_resources/resources/apps_data
+          cp -R extra_pack_build/artifacts-extra/* applications/main/extra_resources/resources/apps/
+          if [ -d extra_pack_build/apps_data ]; then
+            cp -R extra_pack_build/apps_data/* applications/main/extra_resources/resources/apps_data/ || true
+          fi
+          rm -rf extra_pack_build /tmp/all-the-apps-extra.tgz
+          rm -f build/f7-firmware-C/toolbox/version.*
+
+      - name: Build extra-apps updater package
+        if: steps.pack.outputs.present == 'true'
+        run: ./fbt COMPACT=1 DEBUG=0 updater_package
+
+      - name: Attach e package to GitHub Release
+        if: steps.pack.outputs.present == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/f7-C/*.tgz
+            dist/f7-C/*.zip

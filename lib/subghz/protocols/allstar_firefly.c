@@ -115,8 +115,7 @@ void* subghz_protocol_encoder_allstar_firefly_alloc(SubGhzEnvironment* environme
 
 /**
  * Generating an upload from data.
- * @param context Pointer to a SubGhzProtocolEncoderAllstarFirefly instance
- * @return true Always; this encoder has no failure path
+ * @param instance Pointer to a SubGhzProtocolEncoderAllstarFirefly instance
  */
 static bool subghz_protocol_encoder_allstar_firefly_get_upload(void* context) {
     SubGhzProtocolEncoderAllstarFirefly* instance = context;

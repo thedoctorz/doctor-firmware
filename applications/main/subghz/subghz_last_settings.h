@@ -29,8 +29,14 @@ typedef struct {
     float rssi;
     bool delete_old_signals;
     float hopping_threshold;
+    uint32_t hopping_mode;
+    uint32_t hopping_mod_a;
+    uint32_t hopping_mod_b;
     bool leds_and_amp;
     uint8_t tx_power;
+    bool autosave;
+    bool gps_companion;
+    bool read_raw_auto;
 } SubGhzLastSettings;
 
 SubGhzLastSettings* subghz_last_settings_alloc(void);

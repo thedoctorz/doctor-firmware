@@ -58,6 +58,19 @@ void subghz_dialog_message_freq_error(SubGhz* subghz, bool only_rx) {
     dialog_message_free(message);
 }
 
+void subghz_dialog_message_no_ext_module(SubGhz* subghz) {
+    DialogMessage* message = dialog_message_alloc();
+
+    dialog_message_set_header(message, "No external module", 64, 3, AlignCenter, AlignTop);
+    dialog_message_set_text(
+        message, "Dual RX needs an\nexternal CC1101.", 4, 22, AlignLeft, AlignTop);
+    dialog_message_set_icon(message, &I_WarningDolphinFlip_45x42, 83, 22);
+    dialog_message_set_buttons(message, NULL, "OK", NULL);
+
+    dialog_message_show(subghz->dialogs, message);
+    dialog_message_free(message);
+}
+
 bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
     furi_assert(subghz);
     furi_assert(file_path);
@@ -68,6 +81,7 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
         flipper_format_get_raw_stream(subghz_txrx_get_fff_data(subghz->txrx));
 
     SubGhzLoadKeyState load_key_state = SubGhzLoadKeyStateParseErr;
+    const char* parse_error = "Cannot parse\nfile";
     FuriString* temp_str = furi_string_alloc();
     uint32_t temp_data32;
 
@@ -75,25 +89,30 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
         stream_clean(fff_data_stream);
         if(!flipper_format_file_open_existing(fff_data_file, file_path)) {
             FURI_LOG_E(TAG, "Error open file %s", file_path);
+            parse_error = "Cannot open\nfile";
             break;
         }
 
         if(!flipper_format_read_header(fff_data_file, temp_str, &temp_data32)) {
             FURI_LOG_E(TAG, "Missing or incorrect header");
+            parse_error = "Bad file\nheader";
             break;
         }
+        furi_string_trim(temp_str);
 
         if(((!strcmp(furi_string_get_cstr(temp_str), SUBGHZ_KEY_FILE_TYPE)) ||
             (!strcmp(furi_string_get_cstr(temp_str), SUBGHZ_RAW_FILE_TYPE))) &&
            temp_data32 == SUBGHZ_KEY_FILE_VERSION) {
         } else {
             FURI_LOG_E(TAG, "Type or version mismatch");
+            parse_error = "Unknown file\ntype";
             break;
         }
 
         //Load frequency
         if(!flipper_format_read_uint32(fff_data_file, "Frequency", &temp_data32, 1)) {
             FURI_LOG_E(TAG, "Missing Frequency");
+            parse_error = "Missing\nFrequency";
             break;
         }
 
@@ -114,12 +133,15 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
         //Load preset
         if(!flipper_format_read_string(fff_data_file, "Preset", temp_str)) {
             FURI_LOG_E(TAG, "Missing Preset");
+            parse_error = "Missing\nPreset";
             break;
         }
+        furi_string_trim(temp_str);
 
         furi_string_set_str(
             temp_str, subghz_txrx_get_preset_name(subghz->txrx, furi_string_get_cstr(temp_str)));
         if(!strcmp(furi_string_get_cstr(temp_str), "")) {
+            parse_error = "Unknown\npreset";
             break;
         }
         SubGhzSetting* setting = subghz_txrx_get_setting(subghz->txrx);
@@ -132,6 +154,7 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
             if(!subghz_setting_load_custom_preset(
                    setting, furi_string_get_cstr(temp_str), fff_data_file)) {
                 FURI_LOG_E(TAG, "Missing Custom preset");
+                parse_error = "Bad custom\npreset";
                 break;
             }
         }
@@ -158,8 +181,10 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
         //Load protocol
         if(!flipper_format_read_string(fff_data_file, "Protocol", temp_str)) {
             FURI_LOG_E(TAG, "Missing Protocol");
+            parse_error = "Missing\nProtocol";
             break;
         }
+        furi_string_trim(temp_str);
 
         FlipperFormat* fff_data = subghz_txrx_get_fff_data(subghz->txrx);
         if(!strcmp(furi_string_get_cstr(temp_str), "RAW")) {
@@ -184,6 +209,7 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
             }
         } else {
             FURI_LOG_E(TAG, "Protocol not found");
+            parse_error = "Unknown\nprotocol";
             break;
         }
 
@@ -197,7 +223,7 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
     switch(load_key_state) {
     case SubGhzLoadKeyStateParseErr:
         if(show_dialog) {
-            dialog_message_show_storage_error(subghz->dialogs, "Cannot parse\nfile");
+            dialog_message_show_storage_error(subghz->dialogs, parse_error);
         }
         return false;
     case SubGhzLoadKeyStateProtocolDescriptionErr:
@@ -231,6 +257,19 @@ bool subghz_key_load(SubGhz* subghz, const char* file_path, bool show_dialog) {
 SubGhzLoadTypeFile subghz_get_load_type_file(SubGhz* subghz) {
     furi_assert(subghz);
     return subghz->load_type_file;
+}
+
+bool subghz_current_signal_is_from_file(SubGhz* subghz) {
+    furi_assert(subghz);
+    return scene_manager_has_previous_scene(subghz->scene_manager, SubGhzSceneSavedMenu);
+}
+
+FlipperFormat* subghz_get_current_signal_data(SubGhz* subghz) {
+    furi_assert(subghz);
+    if(subghz_current_signal_is_from_file(subghz)) {
+        return subghz_txrx_get_fff_data(subghz->txrx);
+    }
+    return subghz_history_get_raw_data(subghz->history, subghz->idx_menu_chosen);
 }
 
 bool subghz_get_next_name_file(SubGhz* subghz, uint8_t max_len) {
@@ -318,35 +357,28 @@ bool subghz_save_protocol_to_file(
     return saved;
 }
 
+bool subghz_save_raw_from_key(SubGhz* subghz, const char* file_path) {
+    furi_assert(subghz);
+    furi_assert(file_path);
+
+    if(!subghz_txrx_save_raw_from_key(
+           subghz->txrx, subghz_txrx_get_fff_data(subghz->txrx), file_path)) {
+        dialog_message_show_storage_error(subghz->dialogs, "Cannot encode\nsignal to RAW");
+        return false;
+    }
+
+    return true;
+}
+
 void subghz_save_to_file(void* context) {
     furi_assert(context);
     SubGhz* subghz = context;
-
-    if(!subghz_path_is_file(subghz->file_path)) {
-        return;
+    if(subghz_path_is_file(subghz->file_path)) {
+        subghz_save_protocol_to_file(
+            subghz,
+            subghz_txrx_get_fff_data(subghz->txrx),
+            furi_string_get_cstr(subghz->file_path));
     }
-
-    FlipperFormat* fff_data = subghz_txrx_get_fff_data(subghz->txrx);
-
-    //Guard against corrupting RAW files
-    //This callback runs after transmitting a dynamic protocol to persist the
-    //updated rolling counter back into its source file. But file_path and
-    //fff_data can be stale relative to what was actually transmitted: e.g.
-    //sending a received signal from the Info screen leaves file_path pointing
-    //at a previously opened RAW file while fff_data still holds only the RAW
-    //header (Protocol/File_name/Radio_device_name). Writing that buffer would
-    //delete the RAW_Data and destroy the file. RAW samples are streamed from
-    //disk and are never persisted through this path, so never save RAW here.
-    FuriString* protocol = furi_string_alloc();
-    bool is_raw = flipper_format_rewind(fff_data) &&
-                  flipper_format_read_string(fff_data, "Protocol", protocol) &&
-                  furi_string_equal(protocol, "RAW");
-    furi_string_free(protocol);
-    if(is_raw) {
-        return;
-    }
-
-    subghz_save_protocol_to_file(subghz, fff_data, furi_string_get_cstr(subghz->file_path));
 }
 
 bool subghz_load_protocol_from_file(SubGhz* subghz) {
@@ -356,7 +388,9 @@ bool subghz_load_protocol_from_file(SubGhz* subghz) {
 
     DialogsFileBrowserOptions browser_options;
     dialog_file_browser_set_basic_options(
-        &browser_options, SUBGHZ_APP_FILENAME_EXTENSION, &I_sub1_10px);
+        &browser_options,
+        SUBGHZ_APP_FILENAME_EXTENSION "|" SUBGHZ_PSF_FILENAME_EXTENSION,
+        &I_sub1_10px);
     browser_options.base_path = SUBGHZ_APP_FOLDER;
 
     // Input events and views are managed by file_select
@@ -429,8 +463,34 @@ void subghz_file_name_clear(SubGhz* subghz) {
     furi_string_reset(subghz->file_path_tmp);
 }
 
+bool subghz_restore_raw_file_path(SubGhz* subghz) {
+    furi_assert(subghz);
+
+    FlipperFormat* fff_data = subghz_txrx_get_fff_data(subghz->txrx);
+    FuriString* temp_str = furi_string_alloc();
+    bool ret = false;
+
+    do {
+        if(!flipper_format_rewind(fff_data)) {
+            break;
+        }
+        if(!flipper_format_read_string(fff_data, "File_name", temp_str)) {
+            break;
+        }
+        if(!subghz_path_is_file(temp_str)) {
+            break;
+        }
+        furi_string_set(subghz->file_path, temp_str);
+        ret = true;
+    } while(false);
+
+    furi_string_free(temp_str);
+    return ret;
+}
+
 bool subghz_path_is_file(FuriString* path) {
-    return furi_string_end_with(path, SUBGHZ_APP_FILENAME_EXTENSION);
+    return furi_string_end_with(path, SUBGHZ_APP_FILENAME_EXTENSION) ||
+           furi_string_end_with(path, SUBGHZ_PSF_FILENAME_EXTENSION);
 }
 
 void subghz_lock(SubGhz* subghz) {

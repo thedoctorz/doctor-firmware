@@ -15,11 +15,21 @@ struct SubGhzReceiver {
     SubGhzReceiverSlotArray_t slots;
     SubGhzProtocolFlag filter;
 
+    SubGhzProtocolFlag modulation;
+
+    SubGhzProtocolFlag band;
+
     SubGhzReceiverCallback callback;
     void* context;
 };
 
 SubGhzReceiver* subghz_receiver_alloc_init(SubGhzEnvironment* environment) {
+    return subghz_receiver_alloc_init_ex(environment, 0);
+}
+
+SubGhzReceiver* subghz_receiver_alloc_init_ex(
+    SubGhzEnvironment* environment,
+    SubGhzProtocolFlag exclude_flags) {
     SubGhzReceiver* instance = malloc(sizeof(SubGhzReceiver));
     SubGhzReceiverSlotArray_init(instance->slots);
     const SubGhzProtocolRegistry* protocol_registry_items =
@@ -29,6 +39,10 @@ SubGhzReceiver* subghz_receiver_alloc_init(SubGhzEnvironment* environment) {
         const SubGhzProtocol* protocol =
             subghz_protocol_registry_get_by_index(protocol_registry_items, i);
 
+        if(exclude_flags && (protocol->flag & exclude_flags) != 0) {
+            continue;
+        }
+
         if(protocol->decoder && protocol->decoder->alloc) {
             SubGhzReceiverSlot* slot = SubGhzReceiverSlotArray_push_new(instance->slots);
             slot->base = protocol->decoder->alloc(environment);
@@ -37,6 +51,8 @@ SubGhzReceiver* subghz_receiver_alloc_init(SubGhzEnvironment* environment) {
 
     instance->callback = NULL;
     instance->context = NULL;
+    instance->modulation = SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM;
+    instance->band = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_868;
     return instance;
 }
 
@@ -63,7 +79,9 @@ void subghz_receiver_decode(SubGhzReceiver* instance, bool level, uint32_t durat
 
     for
         M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
-            if((slot->base->protocol->flag & instance->filter) != 0) {
+            if((slot->base->protocol->flag & instance->filter) != 0 &&
+               (slot->base->protocol->flag & instance->modulation) != 0 &&
+               (slot->base->protocol->flag & instance->band) != 0) {
                 slot->base->protocol->decoder->feed(slot->base, level, duration);
             }
         }
@@ -105,6 +123,38 @@ void subghz_receiver_set_rx_callback(
 void subghz_receiver_set_filter(SubGhzReceiver* instance, SubGhzProtocolFlag filter) {
     furi_check(instance);
     instance->filter = filter;
+}
+
+void subghz_receiver_set_modulation(SubGhzReceiver* instance, SubGhzProtocolFlag modulation) {
+    furi_check(instance);
+
+    if((modulation & (SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM)) == 0) {
+        modulation = SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM;
+    }
+
+    instance->modulation = modulation;
+}
+
+void subghz_receiver_set_band(SubGhzReceiver* instance, SubGhzProtocolFlag band) {
+    furi_check(instance);
+
+    const SubGhzProtocolFlag all = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 |
+                                   SubGhzProtocolFlag_868;
+    if((band & all) == 0) {
+        band = all;
+    }
+
+    instance->band = band;
+}
+
+void subghz_receiver_set_gate(SubGhzReceiver* instance, SubGhzProtocolFlag gate) {
+    furi_check(instance);
+
+    subghz_receiver_set_modulation(
+        instance, gate & (SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM));
+    subghz_receiver_set_band(
+        instance,
+        gate & (SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_868));
 }
 
 SubGhzProtocolDecoderBase* subghz_receiver_search_decoder_base_by_name(

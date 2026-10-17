@@ -17,8 +17,6 @@ static const NotificationSequence sequence_saved = {
     NULL,
 };
 
-/** One analyzer at a time, and each scene entry maps a fresh copy of the plugin, so a file
- * static is enough. */
 static SubGhzFrequencyAnalyzer* subghz_frequency_analyzer = NULL;
 
 static void subghz_frequency_analyzer_plugin_callback(SubGhzCustomEvent event, void* context) {
@@ -69,7 +67,6 @@ static bool subghz_frequency_analyzer_plugin_on_event(SubGhz* subghz, SceneManag
                 subghz_frequency_analyzer_get_frequency_to_save(subghz_frequency_analyzer);
             if(frequency > 0) {
                 subghz->last_settings->frequency = frequency;
-                // Disable Hopping before opening the receiver scene!
                 if(subghz->last_settings->enable_hopping) {
                     subghz->last_settings->enable_hopping = false;
                 }
@@ -87,19 +84,12 @@ static void subghz_frequency_analyzer_plugin_on_exit(SubGhz* subghz) {
 
     notification_message(subghz->notifications, &sequence_reset_rgb);
 
-    // Read before the view goes away: the trigger level lives in the worker, which the view frees
-    // on exit.
     subghz->last_settings->frequency_analyzer_feedback_level =
         subghz_frequency_analyzer_feedback_level(subghz_frequency_analyzer, 0, false);
     subghz->last_settings->frequency_analyzer_trigger =
         subghz_frequency_analyzer_get_trigger_level(subghz_frequency_analyzer);
     subghz_last_settings_save(subghz->last_settings);
 
-    // Park on an app-owned view before dropping ours. Removing the view while it is still the
-    // current one leaves the dispatcher with no view, which stops the app's event loop for good
-    // (view_dispatcher.c, view_dispatcher_set_current_view). The switch also runs our view's exit
-    // handler, which joins the worker thread - that thread runs plugin code, so it has to be gone
-    // before the caller unmaps us.
     view_dispatcher_switch_to_view(subghz->view_dispatcher, SubGhzViewIdWidget);
     view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdFrequencyAnalyzer);
     subghz_frequency_analyzer_free(subghz_frequency_analyzer);

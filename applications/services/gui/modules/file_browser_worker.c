@@ -225,6 +225,58 @@ static bool browser_folder_init(
     return state;
 }
 
+// Build idx_last so Back restores selection when opening at a nested path
+static void browser_build_idx_last(BrowserWorker* browser, FuriString* target_path) {
+    FuriString* path = furi_string_alloc();
+    FuriString* target = furi_string_alloc_set(target_path);
+    FuriString* child_name = furi_string_alloc();
+
+    if(browser_path_is_file(target)) {
+        browser_path_trim(target);
+    }
+    browser_folder_check_and_switch(target);
+
+    if(!furi_string_empty(browser->path_start)) {
+        furi_string_set(path, browser->path_start);
+    } else {
+        furi_string_set(path, BROWSER_ROOT);
+    }
+    browser_folder_check_and_switch(path);
+
+    while(furi_string_cmp(path, target) != 0) {
+        size_t path_len = furi_string_size(path);
+        if((furi_string_size(target) <= path_len) || !furi_string_start_with(target, path) ||
+           (furi_string_get_char(target, path_len) != '/')) {
+            IdxLastArray_reset(browser->idx_last);
+            break;
+        }
+
+        size_t next_slash = furi_string_search_char(target, '/', path_len + 1);
+        if(next_slash == FURI_STRING_FAILURE) {
+            furi_string_set_n(
+                child_name, target, path_len + 1, furi_string_size(target) - path_len - 1);
+        } else {
+            furi_string_set_n(child_name, target, path_len + 1, next_slash - path_len - 1);
+        }
+
+        uint32_t item_cnt = 0;
+        int32_t file_idx = -1;
+        browser_folder_init(browser, path, child_name, &item_cnt, &file_idx);
+        if(file_idx < 0) {
+            IdxLastArray_reset(browser->idx_last);
+            break;
+        }
+
+        IdxLastArray_push_back(browser->idx_last, file_idx);
+        furi_string_cat_str(path, "/");
+        furi_string_cat(path, child_name);
+    }
+
+    furi_string_free(child_name);
+    furi_string_free(target);
+    furi_string_free(path);
+}
+
 // Load files list by chunks, like it was originally, not compatible with sorting, sorting needs to be disabled to use this
 static bool browser_folder_load_chunked(
     BrowserWorker* browser,
@@ -378,10 +430,14 @@ static int32_t browser_worker(void* context) {
 
         if(flags & WorkerEvtConfigChange) {
             // If start path is a path to the file - try finding index of this file in a folder
+            furi_string_reset(filename);
             if(browser_path_is_file(browser->path_next)) {
                 path_extract_filename(browser->path_next, filename, false);
             }
             IdxLastArray_reset(browser->idx_last);
+            // When reopening at a nested path, restore parent selection history for Back
+            browser_build_idx_last(browser, browser->path_next);
+            browser->item_sel_idx = -1;
 
             furi_thread_flags_set(furi_thread_get_id(browser->thread), WorkerEvtFolderEnter);
         }
@@ -390,8 +446,10 @@ static int32_t browser_worker(void* context) {
             furi_string_set(path, browser->path_next);
             bool is_root = browser_folder_check_and_switch(path);
 
-            // Push previous selected item index to history array
-            IdxLastArray_push_back(browser->idx_last, browser->item_sel_idx);
+            // Push previous selected item index when entering via user selection
+            if(browser->item_sel_idx >= 0) {
+                IdxLastArray_push_back(browser->idx_last, browser->item_sel_idx);
+            }
 
             int32_t file_idx = 0;
             browser_folder_init(browser, path, filename, &items_cnt, &file_idx);

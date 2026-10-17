@@ -1,6 +1,6 @@
 #pragma once
 
-#include <extra_beacon.h>
+#include <furi_hal_bt.h>
 
 #define FINDMY_STATE_HEADER "FindMy Flipper State"
 #define FINDMY_STATE_VER    1

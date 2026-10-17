@@ -148,6 +148,10 @@ float furi_hal_subghz_get_rssi(void);
  */
 uint8_t furi_hal_subghz_get_lqi(void);
 
+int8_t furi_hal_subghz_get_freq_est(void);
+
+uint32_t furi_hal_subghz_rssi_burst(uint8_t* out, size_t count, uint32_t period_us);
+
 /** Check if frequency is in valid range
  *
  * @param      value  frequency in Hz
@@ -237,6 +241,24 @@ bool furi_hal_subghz_is_async_tx_complete(void);
 /** Stop async transmission and cleanup resources Resets GPIO, TIM2, and DMA1
  */
 void furi_hal_subghz_stop_async_tx(void);
+
+void furi_hal_subghz_shadow_invalidate(void);
+
+void furi_hal_subghz_hop_cache_reset(void);
+
+bool furi_hal_subghz_hop_begin(void);
+
+bool furi_hal_subghz_hop_prepare(uint32_t frequency);
+
+bool furi_hal_subghz_hop_goto(uint32_t frequency, const uint8_t* preset_data);
+
+void furi_hal_subghz_hop_resume(void);
+
+void furi_hal_subghz_hop_end(void);
+
+bool furi_hal_subghz_hop_read_image(uint8_t* out);
+
+bool furi_hal_subghz_hop_get_shadow(uint8_t* out);
 
 // External CC1101 Amplifier and LEDs (if present) control
 void furi_hal_subghz_set_ext_leds_and_amp(bool enabled);

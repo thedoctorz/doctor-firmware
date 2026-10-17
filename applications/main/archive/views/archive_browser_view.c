@@ -10,35 +10,20 @@
 
 static const char* ArchiveTabNames[] = {
     [ArchiveTabFavorites] = "Favorites",
-    [ArchiveTabIButton] = "iButton",
-    [ArchiveTabNFC] = "NFC",
     [ArchiveTabSubGhz] = "Sub-GHz",
-    [ArchiveTabSubGhzRemote] = "SubRem",
-    [ArchiveTabLFRFID] = "RFID LF",
-    [ArchiveTabInfrared] = "Infrared",
-    [ArchiveTabBadUsb] = "Bad USB",
-    [ArchiveTabU2f] = "U2F",
     [ArchiveTabApplications] = "Apps",
     [ArchiveTabInternal] = "Internal",
     [ArchiveTabBrowser] = "Browser",
 };
 
 static const Icon* ArchiveItemIcons[] = {
-    [ArchiveFileTypeIButton] = &I_ibutt_10px,
-    [ArchiveFileTypeNFC] = &I_Nfc_10px,
     [ArchiveFileTypeSubGhz] = &I_sub1_10px,
-    [ArchiveFileTypeSubGhzRemote] = &I_subrem_10px,
-    [ArchiveFileTypeLFRFID] = &I_125_10px,
-    [ArchiveFileTypeInfrared] = &I_ir_10px,
-    [ArchiveFileTypeBadUsb] = &I_badusb_10px,
-    [ArchiveFileTypeU2f] = &I_u2f_10px,
     [ArchiveFileTypeApplication] = &I_Apps_10px,
     [ArchiveFileTypeSetting] = &I_settings_10px,
     [ArchiveFileTypeUpdateManifest] = &I_update_10px,
     [ArchiveFileTypeFolder] = &I_dir_10px,
     [ArchiveFileTypeUnknown] = &I_unknown_10px,
     [ArchiveFileTypeLoading] = &I_loading_10px,
-    [ArchiveFileTypeJS] = &I_js_script_10px,
     [ArchiveFileTypeAppOrJs] = &I_unknown_10px,
 };
 
@@ -74,6 +59,8 @@ static void contex_menu_filemanager_init(ArchiveBrowserViewModel* model) {
         archive_menu_add_item(
             menu_array_push_raw(model->context_menu), "NewDir", ArchiveBrowserEventFileMenuNewDir);
         archive_menu_add_item(
+            menu_array_push_raw(model->context_menu), "Search", ArchiveBrowserEventFileMenuSearch);
+        archive_menu_add_item(
             menu_array_push_raw(model->context_menu), "Rename", ArchiveBrowserEventFileMenuRename);
         archive_menu_add_item(
             menu_array_push_raw(model->context_menu), "Delete", ArchiveBrowserEventFileMenuDelete);
@@ -91,6 +78,8 @@ static void contex_menu_filemanager_init(ArchiveBrowserViewModel* model) {
         }
         archive_menu_add_item(
             menu_array_push_raw(model->context_menu), "NewDir", ArchiveBrowserEventFileMenuNewDir);
+        archive_menu_add_item(
+            menu_array_push_raw(model->context_menu), "Search", ArchiveBrowserEventFileMenuSearch);
     }
 }
 
@@ -163,7 +152,7 @@ static void render_item_menu(Canvas* canvas, ArchiveBrowserViewModel* model) {
                 menu_array_push_raw(model->context_menu),
                 item_pin,
                 ArchiveBrowserEventFileMenuPin);
-            if(selected->type <= ArchiveFileTypeBadUsb) {
+            if(selected->type == ArchiveFileTypeSubGhz) {
                 archive_menu_add_item(
                     menu_array_push_raw(model->context_menu),
                     "Show",
@@ -181,7 +170,7 @@ static void render_item_menu(Canvas* canvas, ArchiveBrowserViewModel* model) {
                 menu_array_push_raw(model->context_menu), "Run", ArchiveBrowserEventFileMenuRun);
             archive_menu_add_item(
                 menu_array_push_raw(model->context_menu), "Info", ArchiveBrowserEventFileMenuInfo);
-            if(selected->type <= ArchiveFileTypeBadUsb) {
+            if(selected->type == ArchiveFileTypeSubGhz) {
                 archive_menu_add_item(
                     menu_array_push_raw(model->context_menu),
                     "Show",
@@ -219,11 +208,17 @@ static void render_item_menu(Canvas* canvas, ArchiveBrowserViewModel* model) {
                     menu_array_push_raw(model->context_menu),
                     "Info",
                     ArchiveBrowserEventFileMenuInfo);
-                if(selected->type <= ArchiveFileTypeBadUsb) {
+                if(selected->type == ArchiveFileTypeSubGhz) {
                     archive_menu_add_item(
                         menu_array_push_raw(model->context_menu),
                         "Show",
                         ArchiveBrowserEventFileMenuShow);
+                }
+                if(model->tab_idx == ArchiveTabBrowser) {
+                    archive_menu_add_item(
+                        menu_array_push_raw(model->context_menu),
+                        "Search",
+                        ArchiveBrowserEventFileMenuSearch);
                 }
             }
         }
@@ -712,6 +707,7 @@ ArchiveBrowserView* browser_alloc(void) {
     browser->scroll_timer = furi_timer_alloc(browser_scroll_timer, FuriTimerTypePeriodic, browser);
 
     browser->path = furi_string_alloc_set(archive_get_default_path(TAB_DEFAULT));
+    browser->search_running = false;
 
     with_view_model(
         browser->view,

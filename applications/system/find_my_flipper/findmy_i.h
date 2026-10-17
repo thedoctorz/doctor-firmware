@@ -3,8 +3,8 @@
 #include "findmy.h"
 #include "findmy_state.h"
 #include <furi_hal_bt.h>
-#include <extra_beacon.h>
 #include "findmy_icons.h"
+#include <stdio.h>
 #include <toolbox/stream/file_stream.h>
 #include <toolbox/hex.h>
 #include <toolbox/path.h>

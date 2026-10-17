@@ -245,6 +245,15 @@ void rpc_debug_print_message(const PB_Main* message) {
         furi_string_cat_printf(
             str, "\t\type: %d\r\n", message->content.gui_send_input_event_request.type);
         break;
+    case PB_Main_gui_send_text_request_tag:
+        furi_string_cat_printf(str, "\tsend_text {\r\n");
+        furi_string_cat_printf(
+            str, "\t\taction: %d\r\n", message->content.gui_send_text_request.action);
+        break;
+    case PB_Main_gui_input_focus_tag:
+        furi_string_cat_printf(str, "\tinput_focus {\r\n");
+        furi_string_cat_printf(str, "\t\tkind: %d\r\n", message->content.gui_input_focus.kind);
+        break;
     case PB_Main_gui_start_virtual_display_request_tag:
         furi_string_cat_printf(str, "\tstart_virtual_display {\r\n");
         break;

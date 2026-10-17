@@ -82,8 +82,7 @@ static void subghz_protocol_keyfinder_check_remote_controller(SubGhzBlockGeneric
 
 /**
  * Generating an upload from data.
- * @param context Pointer to a SubGhzProtocolEncoderKeyFinder instance
- * @return true Always; this encoder has no failure path
+ * @param instance Pointer to a SubGhzProtocolEncoderKeyFinder instance
  */
 static bool subghz_protocol_encoder_keyfinder_get_upload(void* context) {
     SubGhzProtocolEncoderKeyFinder* instance = context;

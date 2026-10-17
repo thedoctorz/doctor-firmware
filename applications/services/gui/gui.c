@@ -1,6 +1,8 @@
 #include "gui_i.h"
 #include <assets_icons.h>
 
+bool notification_is_display_backlight_on(void);
+
 #define TAG "GuiSrv"
 
 ViewPort* gui_view_port_find_enabled(ViewPortArray_t array) {
@@ -47,6 +49,15 @@ void gui_input_events_callback(const void* value, void* ctx) {
     furi_assert(ctx);
 
     Gui* gui = ctx;
+    const InputEvent* event = value;
+
+    if(event->type == InputTypePress && !gui_is_lockdown(gui) &&
+       !notification_is_display_backlight_on()) {
+        const uint8_t key_bit = (uint8_t)(1u << event->key);
+        FURI_CRITICAL_ENTER();
+        gui->wake_swallow_arm |= key_bit;
+        FURI_CRITICAL_EXIT();
+    }
 
     furi_message_queue_put(gui->input_queue, value, FuriWaitForever);
     furi_thread_flags_set(gui->thread_id, GUI_THREAD_FLAG_INPUT);
@@ -66,6 +77,7 @@ static bool gui_redraw_fs(Gui* gui) {
 }
 
 static void gui_redraw_status_bar(Gui* gui, bool need_attention) {
+    if(gui->hide_statusbar_count > 0) return;
     ViewPortArray_it_t it;
     uint8_t left_used = 0;
     uint8_t right_used = 0;
@@ -293,6 +305,23 @@ static void gui_input(Gui* gui, InputEvent* input_event) {
     gui_lock(gui);
 
     do {
+        if(input_event->type == InputTypePress) {
+            FURI_CRITICAL_ENTER();
+            const bool wake_only = (gui->wake_swallow_arm & key_bit) != 0;
+            gui->wake_swallow_arm &= (uint8_t)~key_bit;
+            FURI_CRITICAL_EXIT();
+            if(wake_only) {
+                gui->wake_swallow |= key_bit;
+            }
+        }
+
+        if(gui->wake_swallow & key_bit) {
+            if(input_event->type == InputTypeRelease) {
+                gui->wake_swallow &= (uint8_t)~key_bit;
+            }
+            break;
+        }
+
         if(gui->direct_draw && !gui->ongoing_input_view_port) {
             break;
         }
@@ -484,6 +513,20 @@ size_t gui_get_framebuffer_size(const Gui* gui) {
     return canvas_get_buffer_size(gui->canvas);
 }
 
+void gui_set_hide_statusbar(Gui* gui, bool hidden) {
+    furi_assert(gui);
+
+    gui_lock(gui);
+    if(hidden) {
+        gui->hide_statusbar_count++;
+    } else if(gui->hide_statusbar_count > 0) {
+        gui->hide_statusbar_count--;
+    }
+    gui_unlock(gui);
+
+    gui_update(gui);
+}
+
 void gui_set_lockdown(Gui* gui, bool lockdown) {
     furi_check(gui);
 
@@ -542,6 +585,7 @@ void gui_direct_draw_release(Gui* gui) {
 
 Gui* gui_alloc(void) {
     Gui* gui = malloc(sizeof(Gui));
+    gui->hide_statusbar_count = 0;
     // Thread ID
     gui->thread_id = furi_thread_get_current_id();
     // Allocate mutex
@@ -558,6 +602,8 @@ Gui* gui_alloc(void) {
     // Input
     gui->input_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
     gui->input_events = furi_record_open(RECORD_INPUT_EVENTS);
+    gui->wake_swallow = 0;
+    gui->wake_swallow_arm = 0;
 
     furi_pubsub_subscribe(gui->input_events, gui_input_events_callback, gui);
 

@@ -49,15 +49,42 @@ FlipperFormat* flipper_format_buffered_file_alloc(Storage* storage) {
     return flipper_format;
 }
 
+static bool flipper_format_skip_utf8_bom(FlipperFormat* flipper_format) {
+    uint8_t bom[3];
+    size_t read = stream_read(flipper_format->stream, bom, sizeof(bom));
+    if(read == sizeof(bom) && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
+        return true;
+    }
+    return read == 0 ||
+           stream_seek(flipper_format->stream, -(int32_t)read, StreamOffsetFromCurrent);
+}
+
+static bool flipper_format_seek_start(FlipperFormat* flipper_format) {
+    return stream_rewind(flipper_format->stream) && flipper_format_skip_utf8_bom(flipper_format);
+}
+
 bool flipper_format_file_open_existing(FlipperFormat* flipper_format, const char* path) {
     furi_check(flipper_format);
-    return file_stream_open(flipper_format->stream, path, FSAM_READ_WRITE, FSOM_OPEN_EXISTING);
+    if(!file_stream_open(flipper_format->stream, path, FSAM_READ_WRITE, FSOM_OPEN_EXISTING)) {
+        file_stream_close(flipper_format->stream);
+        if(!file_stream_open(flipper_format->stream, path, FSAM_READ, FSOM_OPEN_EXISTING)) {
+            return false;
+        }
+    }
+    return flipper_format_skip_utf8_bom(flipper_format);
 }
 
 bool flipper_format_buffered_file_open_existing(FlipperFormat* flipper_format, const char* path) {
     furi_check(flipper_format);
-    return buffered_file_stream_open(
-        flipper_format->stream, path, FSAM_READ_WRITE, FSOM_OPEN_EXISTING);
+    if(!buffered_file_stream_open(
+           flipper_format->stream, path, FSAM_READ_WRITE, FSOM_OPEN_EXISTING)) {
+        buffered_file_stream_close(flipper_format->stream);
+        if(!buffered_file_stream_open(
+               flipper_format->stream, path, FSAM_READ, FSOM_OPEN_EXISTING)) {
+            return false;
+        }
+    }
+    return flipper_format_skip_utf8_bom(flipper_format);
 }
 
 bool flipper_format_file_open_append(FlipperFormat* flipper_format, const char* path) {
@@ -129,7 +156,7 @@ void flipper_format_set_strict_mode(FlipperFormat* flipper_format, bool strict_m
 
 bool flipper_format_rewind(FlipperFormat* flipper_format) {
     furi_check(flipper_format);
-    return stream_rewind(flipper_format->stream);
+    return flipper_format_seek_start(flipper_format);
 }
 
 size_t flipper_format_tell(FlipperFormat* flipper_format) {
@@ -150,7 +177,7 @@ bool flipper_format_seek_to_end(FlipperFormat* flipper_format) {
 
 bool flipper_format_key_exist(FlipperFormat* flipper_format, const char* key) {
     size_t pos = stream_tell(flipper_format->stream);
-    stream_seek(flipper_format->stream, 0, StreamOffsetFromStart);
+    flipper_format_seek_start(flipper_format);
     bool result = flipper_format_stream_seek_to_key(flipper_format->stream, key, false);
     stream_seek(flipper_format->stream, pos, StreamOffsetFromStart);
 

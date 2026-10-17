@@ -72,6 +72,29 @@ struct BleServiceSerial {
     GapSvcEventHandler* event_handler;
 };
 
+static void ble_svc_serial_send_credits(BleServiceSerial* serial_svc, uint32_t credits) {
+    uint32_t credits_reversed = REVERSE_BYTES_U32(credits);
+    ble_gatt_characteristic_update(
+        serial_svc->svc_handle,
+        &serial_svc->chars[SerialSvcGattCharacteristicFlowCtrl],
+        &credits_reversed);
+}
+
+static void ble_svc_serial_give_credits(BleServiceSerial* serial_svc, uint32_t available) {
+    if(available == 0 || serial_svc->buff_size == 0) {
+        return;
+    }
+
+    if(serial_svc->bytes_ready_to_receive == 0) {
+        uint32_t credits = available;
+        if(credits > serial_svc->buff_size) {
+            credits = serial_svc->buff_size;
+        }
+        serial_svc->bytes_ready_to_receive = (uint16_t)credits;
+        ble_svc_serial_send_credits(serial_svc, credits);
+    }
+}
+
 static BleEventAckStatus ble_svc_serial_event_handler(void* event, void* context) {
     BleServiceSerial* serial_svc = (BleServiceSerial*)context;
     BleEventAckStatus ret = BleEventNotAck;
@@ -202,21 +225,28 @@ void ble_svc_serial_set_callbacks(
         &buff_size_reversed);
 }
 
+void ble_svc_serial_notify_credits(BleServiceSerial* serial_svc, uint32_t available) {
+    furi_check(serial_svc);
+    furi_check(serial_svc->buff_size_mtx);
+
+    furi_check(furi_mutex_acquire(serial_svc->buff_size_mtx, FuriWaitForever) == FuriStatusOk);
+    if(serial_svc->callback) {
+        SerialServiceEvent event = {.event = SerialServiceEventTypeQueryAvailable};
+        uint32_t fresh = serial_svc->callback(event, serial_svc->context);
+        if(fresh < available) {
+            available = fresh;
+        }
+    }
+    ble_svc_serial_give_credits(serial_svc, available);
+    furi_check(furi_mutex_release(serial_svc->buff_size_mtx) == FuriStatusOk);
+}
+
 void ble_svc_serial_notify_buffer_is_empty(BleServiceSerial* serial_svc) {
     furi_check(serial_svc);
     furi_check(serial_svc->buff_size_mtx);
 
     furi_check(furi_mutex_acquire(serial_svc->buff_size_mtx, FuriWaitForever) == FuriStatusOk);
-    if(serial_svc->bytes_ready_to_receive == 0) {
-        FURI_LOG_D(TAG, "Buffer is empty. Notifying client");
-        serial_svc->bytes_ready_to_receive = serial_svc->buff_size;
-
-        uint32_t buff_size_reversed = REVERSE_BYTES_U32(serial_svc->buff_size);
-        ble_gatt_characteristic_update(
-            serial_svc->svc_handle,
-            &serial_svc->chars[SerialSvcGattCharacteristicFlowCtrl],
-            &buff_size_reversed);
-    }
+    ble_svc_serial_give_credits(serial_svc, serial_svc->buff_size);
     furi_check(furi_mutex_release(serial_svc->buff_size_mtx) == FuriStatusOk);
 }
 

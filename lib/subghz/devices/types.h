@@ -12,7 +12,7 @@
 #include <flipper_application/flipper_application.h>
 
 #define SUBGHZ_RADIO_DEVICE_PLUGIN_APP_ID      "subghz_radio_device"
-#define SUBGHZ_RADIO_DEVICE_PLUGIN_API_VERSION 2
+#define SUBGHZ_RADIO_DEVICE_PLUGIN_API_VERSION 4
 
 /** A radio device plugin's appid, and so its .fal file name, has to start with this - the
  * registry skips everything else sharing its folder rather than loading it to find out. */
@@ -48,11 +48,22 @@ typedef void (*SubGhzStopAsyncRx)(void);
 
 typedef float (*SubGhzGetRSSI)(void);
 typedef uint8_t (*SubGhzGetLQI)(void);
+typedef int8_t (*SubGhzGetFreqEst)(void);
+
+typedef uint32_t (*SubGhzRssiBurst)(uint8_t* out, size_t count, uint32_t period_us);
 
 typedef bool (*SubGhzRxPipeNotEmpty)(void);
 typedef bool (*SubGhzRxIsDataCrcValid)(void);
 typedef void (*SubGhzReadPacket)(uint8_t* data, uint8_t* size);
 typedef void (*SubGhzWritePacket)(const uint8_t* data, uint8_t size);
+
+typedef bool (*SubGhzHopBegin)(void);
+typedef bool (*SubGhzHopPrepare)(uint32_t frequency);
+typedef bool (*SubGhzHopGoto)(uint32_t frequency, const uint8_t* preset_data);
+typedef void (*SubGhzHopResume)(void);
+typedef void (*SubGhzHopEnd)(void);
+typedef bool (*SubGhzHopReadImage)(uint8_t* out);
+typedef bool (*SubGhzHopGetShadow)(uint8_t* out);
 
 typedef struct {
     SubGhzBegin begin;
@@ -82,11 +93,22 @@ typedef struct {
 
     SubGhzGetRSSI get_rssi;
     SubGhzGetLQI get_lqi;
+    SubGhzGetFreqEst get_freq_est;
+
+    SubGhzRssiBurst rssi_burst;
 
     SubGhzRxPipeNotEmpty rx_pipe_not_empty;
     SubGhzRxIsDataCrcValid is_rx_data_crc_valid;
     SubGhzReadPacket read_packet;
     SubGhzWritePacket write_packet;
+
+    SubGhzHopBegin hop_begin;
+    SubGhzHopPrepare hop_prepare;
+    SubGhzHopGoto hop_goto;
+    SubGhzHopResume hop_resume;
+    SubGhzHopEnd hop_end;
+    SubGhzHopReadImage hop_read_image;
+    SubGhzHopGetShadow hop_get_shadow;
 
 } SubGhzDeviceInterconnect;
 

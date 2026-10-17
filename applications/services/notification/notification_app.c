@@ -32,11 +32,12 @@ static void notification_sound_off(void);
 static uint8_t notification_settings_get_display_brightness(NotificationApp* app, uint8_t value);
 static uint8_t notification_settings_get_rgb_led_brightness(NotificationApp* app, uint8_t value);
 static uint32_t notification_settings_display_off_delay_ticks(NotificationApp* app);
+bool notification_is_display_backlight_on(void);
 
 // status of lcd backlight
 // used to ignore backlight_on event if backlight active now
 // prevent from extra ticking when key pressed with rgb_mod_installed
-static bool lcd_backlight_is_on = false;
+static volatile bool lcd_backlight_is_on = false;
 
 // --- RGB BACKLIGHT ---
 // local variable for local use
@@ -416,6 +417,15 @@ static uint8_t notification_settings_get_rgb_led_brightness(NotificationApp* app
 static uint32_t notification_settings_display_off_delay_ticks(NotificationApp* app) {
     return (float)(app->settings.display_off_delay_ms) /
            (1000.0f / furi_kernel_get_tick_frequency());
+}
+
+uint32_t notification_get_display_off_delay_ms(NotificationApp* app) {
+    furi_assert(app);
+    return app->settings.display_off_delay_ms;
+}
+
+bool notification_is_display_backlight_on(void) {
+    return lcd_backlight_is_on;
 }
 
 // generics

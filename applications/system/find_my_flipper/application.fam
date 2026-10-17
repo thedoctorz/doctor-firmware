@@ -12,6 +12,7 @@ App(
     fap_weburl="https://github.com/MatthewKuKanich/FindMyFlipper",
     fap_version="3.5",
     fap_description="BLE FindMy Location Beacon",
+    sources=["*.c", "!findmy_startup.c"],
 )
 
 App(

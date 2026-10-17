@@ -24,60 +24,24 @@
 #define SECPLUS_V2_PACKET_2    0x010000000000
 #define SECPLUS_V2_PACKET_MASK 0x30000000000
 
-/*
- * Security+ 2.0 also has a longer, 86 bit frame used by keypads. It is a 22 bit
- * preamble (0x3C | packet id) followed by 64 bits of payload; only the payload is
- * stored. The three mixing buffers are 18 bits wide instead of 10, the extra low
- * byte of each carrying a 16 bit "data" field. The two halves together make a 32 bit
- * word whose 8 nibbles XORed with the button must be zero, and whose top half is the
- * keypad PIN (byte swapped).
- */
 #define SECPLUS_V2_86_COUNT_BIT    86
 #define SECPLUS_V2_86_PREAMBLE     0x3CUL
 #define SECPLUS_V2_86_PREAMBLE_BIT 22
 
-/*
- * A keypad opens every 86 bit frame with a te_short pulse and a te_long gap, ahead of
- * the manchester preamble. Those two entries are not part of the 86 bits and cannot be
- * produced by the manchester encoder, so they are written out on their own. A 62 bit
- * remote has no such lead in.
- */
 #define SECPLUS_V2_86_LEAD_IN 2
 
-/* A keypad puts four pairs on the air per key press, a 62 bit remote three. */
 #define SECPLUS_V2_86_REPEAT 4
 
-/*
- * Idle the transmitter leaves behind each half, in units of te_long. A remote holds it
- * tight: 64 gaps measured off the air run 68.6 ms to 69.2 ms, mean 69.0 ms, so 138. A
- * keypad is not that regular, 28 gaps wander between 89.0 ms and 92.1 ms, mean 90.9 ms,
- * so the receiver has to accept at least that spread and 182 sits in the middle of it.
- */
 #define SECPLUS_V2_GAP_62 138
 #define SECPLUS_V2_GAP_86 182
 
-/*
- * Lead in gap the receiver syncs on, in units of te_long. A 62 bit remote leaves about
- * 130 of them ahead of each half, the 86 bit keypad about 179, so both windows have to
- * be accepted or a keypad never leaves the reset step.
- */
 #define SECPLUS_V2_SYNC_62       130
 #define SECPLUS_V2_SYNC_62_DELTA 100
 #define SECPLUS_V2_SYNC_86       179
 #define SECPLUS_V2_SYNC_86_DELTA 72
 
-/*
- * The two halves of one transmission follow each other closely. A first half left over
- * from an earlier press cannot belong to the second half being decoded now, so drop it
- * once the gap between frames grows past te_long * 358.
- */
 #define SECPLUS_V2_PAIR_TIMEOUT 358
 
-/* Manchester emits at most two entries per bit, and each of the two packets adds a
- * finish entry, a trailing gap and, for a keypad, the two lead in entries. The 86 bit
- * frame is the longest:
- *   ((22 preamble + 64 payload) * 2 + 2 + 2) * 2 = 352
- * The 62 bit frame needs 252, which is why a 256 entry buffer used to be enough. */
 #define SECPLUS_V2_ENCODER_UPLOAD_SIZE 384
 #define SECPLUS_V2_P_MASK_62           0x03FFu
 #define SECPLUS_V2_P_MASK_86           0x3FFFFu
@@ -95,12 +59,10 @@ struct SubGhzProtocolDecoderSecPlus_v2 {
     SubGhzBlockDecoder decoder;
     SubGhzBlockGeneric generic;
 
-    uint64_t secplus_packet_1;
-    uint32_t secplus_data; // 86 bit frames only
     ManchesterState manchester_saved_state;
-    // width of the half held in secplus_packet_1, so a 62 bit half can never be
-    // handed to the 86 bit reconstruction or the other way round
+    uint64_t secplus_packet_1;
     uint8_t secplus_packet_1_count_bit;
+    uint32_t secplus_data;
     uint8_t packet_id;
 };
 SUBGHZ_ASSERT_DECODER_COMMON_LAYOUT(SubGhzProtocolDecoderSecPlus_v2);
@@ -111,7 +73,7 @@ struct SubGhzProtocolEncoderSecPlus_v2 {
     SubGhzProtocolBlockEncoder encoder;
     SubGhzBlockGeneric generic;
     uint64_t secplus_packet_1;
-    uint32_t secplus_data; // 86 bit frames only
+    uint32_t secplus_data;
 };
 SUBGHZ_ASSERT_ENCODER_GENERIC_LAYOUT(SubGhzProtocolEncoderSecPlus_v2);
 
@@ -337,17 +299,6 @@ static bool
     return true;
 }
 
-/**
- * Security+ 2.0 86-bit half-message decoding.
- * Same shape as the 62 bit variant but the three buffers are 18 bits wide: the top
- * 10 bits of p[0]/p[1] carry the fixed part, the low bytes carry a 16 bit data field,
- * and p[2] holds 9 rolling digits of which the last 4 duplicate the first 4.
- * @param data 64 bit payload of the frame (the 22 bit preamble is not included)
- * @param roll_array return roll_array part, 9 digits
- * @param fixed return fixed part, 20 bits
- * @param data_part return the 16 bit data field
- * @return true On success
- */
 static bool subghz_protocol_secplus_v2_decode_half_86(
     uint64_t data,
     uint8_t roll_array[9],
@@ -389,7 +340,6 @@ static bool subghz_protocol_secplus_v2_decode_half_86(
         }
         k++;
     }
-    // the tail repeats the head, use it as a consistency check
     for(uint8_t i = 0; i < 4; i++) {
         if(digits[i] != digits[i + 9]) return false;
     }
@@ -400,10 +350,6 @@ static bool subghz_protocol_secplus_v2_decode_half_86(
     return true;
 }
 
-/**
- * Security+ 2.0 86-bit half-message encoding.
- * @return 64 bit payload, 0 on failure
- */
 static uint64_t subghz_protocol_secplus_v2_encode_half_86(
     const uint8_t roll_array[9],
     uint32_t fixed,
@@ -432,10 +378,6 @@ static uint64_t subghz_protocol_secplus_v2_encode_half_86(
     return data;
 }
 
-/**
- * Interleave the two 9 digit rolling arrays into the 28 bit counter.
- * @return true if the value is in range
- */
 static bool subghz_protocol_secplus_v2_rolling_join(
     const uint8_t roll_1[9],
     const uint8_t roll_2[9],
@@ -458,13 +400,6 @@ static bool subghz_protocol_secplus_v2_rolling_join(
     return true;
 }
 
-/**
- * Analysis of a received 86 bit (keypad) message.
- * @param instance Pointer to a SubGhzBlockGeneric* instance
- * @param packet_1 first part of the message
- * @param data_out the recovered 32 bit data word
- * @return true On success
- */
 static bool subghz_protocol_secplus_v2_remote_controller_86(
     SubGhzBlockGeneric* instance,
     uint64_t packet_1,
@@ -487,17 +422,8 @@ static bool subghz_protocol_secplus_v2_remote_controller_86(
     }
 
     const uint32_t data_word = ((uint32_t)data_1 << 16) | data_2;
-    /*
-     * The whole byte at bits 19..12 of fixed_1 is the button field, exactly as in the
-     * 62 bit frame. It has to be kept whole: generic.serial is 32 bit while the serial
-     * built below is 40, so those eight bits are the ones the store drops, and
-     * encode_86() is what puts them back. Taking only a nibble here loses fixed_1
-     * bits 19..16 for good and the rebuilt packet 1 no longer matches the keypad.
-     * Only the low nibble takes part in the data checksum.
-     */
     const uint8_t btn = (uint8_t)(fixed_1 >> 12);
 
-    // the 8 nibbles of the data word XORed with the button must cancel out
     uint8_t check = btn & 0x0F;
     for(uint8_t i = 0; i < 32; i += 4) {
         check ^= (data_word >> i) & 0x0F;
@@ -514,37 +440,22 @@ static bool subghz_protocol_secplus_v2_remote_controller_86(
     return true;
 }
 
-/*
- * The keypad PIN of an 86 bit frame lives in the top half of the data word, byte
- * swapped, so a captured signal already carries it and it is saved along with the rest.
- * The "Pin" key in the file stays authoritative: setting it, by hand or with the
- * Security+ PIN app, makes the encoder rebuild the data word around the new value.
- */
 #define SECPLUS_V2_PIN_UNSET 0xFFFFu
 #define SECPLUS_V2_PIN_MAX   9999u
 
-/*
- * The PIN of the signal the decoder currently holds, when it came from a file rather
- * than off the air. Owned by the decoder alone: set in its deserialize(), cleared in
- * its reset(), read only by get_string(). The encoder keeps its own local copy so a
- * transmission can never leave a PIN behind for an unrelated signal to display.
- */
 static uint16_t secplus_v2_pin = SECPLUS_V2_PIN_UNSET;
 
-/** The PIN a frame carries, or SECPLUS_V2_PIN_UNSET if it is not a plain 4 digit one. */
 static uint16_t subghz_protocol_secplus_v2_pin_extract(uint32_t data_word) {
     uint16_t high = (uint16_t)(data_word >> 16);
     uint16_t pin = (uint16_t)((high << 8) | (high >> 8));
     return (pin <= SECPLUS_V2_PIN_MAX) ? pin : SECPLUS_V2_PIN_UNSET;
 }
 
-/** Splice a PIN into the data word; the checksum nibble is fixed up by encode_86(). */
 static uint32_t subghz_protocol_secplus_v2_pin_apply(uint32_t data_word, uint16_t pin) {
     uint16_t high = (uint16_t)((pin << 8) | (pin >> 8));
     return ((uint32_t)high << 16) | (data_word & 0xFFFF);
 }
 
-/** Read the optional "Pin" key. An absent or empty value means "not known yet". */
 static uint16_t subghz_protocol_secplus_v2_pin_read(FlipperFormat* flipper_format) {
     uint16_t pin = SECPLUS_V2_PIN_UNSET;
     FuriString* tmp = furi_string_alloc();
@@ -620,7 +531,7 @@ static void
     }
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
     subghz_custom_btn_set_max(4);
@@ -665,10 +576,6 @@ static uint8_t subghz_protocol_secplus_v2_get_btn_code(void);
  * @param instance SubGhzProtocolEncoderSecPlus_v2* 
  */
 
-/**
- * Security+ 2.0 86 bit (keypad) message encoding. Keeps the PIN that was decoded from
- * the loaded signal and only advances the counter.
- */
 static void subghz_protocol_secplus_v2_encode_86(SubGhzProtocolEncoderSecPlus_v2* instance) {
     uint32_t rolling = subghz_protocol_blocks_reverse_key(instance->generic.cnt, 28);
     uint8_t rolling_digits[18] = {0};
@@ -691,7 +598,6 @@ static void subghz_protocol_secplus_v2_encode_86(SubGhzProtocolEncoderSecPlus_v2
     uint32_t fixed_1 = instance->generic.btn << 12 | instance->generic.serial >> 20;
     uint32_t fixed_2 = instance->generic.serial & 0xFFFFF;
 
-    // recompute the nibble checksum that lives in bits 15..12 of the data word
     uint32_t data_word = instance->secplus_data & ~0xF000UL;
     uint8_t check = instance->generic.btn & 0x0F;
     for(uint8_t i = 0; i < 32; i += 4) {
@@ -708,7 +614,7 @@ static void subghz_protocol_secplus_v2_encode_86(SubGhzProtocolEncoderSecPlus_v2
 
 static void subghz_protocol_secplus_v2_encode(SubGhzProtocolEncoderSecPlus_v2* instance) {
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->generic.btn);
     }
 
@@ -815,12 +721,8 @@ static LevelDuration
 }
 
 /**
- * Emit one half packet into the upload: for an 86 bit frame the keypad lead in and the
- * 22 bit preamble, then the payload, the manchester finish and the trailing gap.
+ * Generating an upload from data.
  * @param instance Pointer to a SubGhzProtocolEncoderSecPlus_v2 instance
- * @param index write cursor into instance->encoder.upload, advanced in place
- * @param payload the half to send, low @p payload_bits bits
- * @param packet_id id carried in the preamble, 86 bit frames only
  */
 static void subghz_protocol_encoder_secplus_v2_emit_packet(
     SubGhzProtocolEncoderSecPlus_v2* instance,
@@ -872,35 +774,23 @@ static void subghz_protocol_encoder_secplus_v2_emit_packet(
             (long_frame ? SECPLUS_V2_GAP_86 : SECPLUS_V2_GAP_62));
 }
 
-/**
- * Generating an upload from data.
- * @param instance Pointer to a SubGhzProtocolEncoderSecPlus_v2 instance
- */
 static bool
     subghz_protocol_encoder_secplus_v2_get_upload(SubGhzProtocolEncoderSecPlus_v2* instance) {
     furi_assert(instance);
     size_t index = 0;
 
     const bool long_frame = (instance->generic.data_count_bit == SECPLUS_V2_86_COUNT_BIT);
-    // 86 bit frames carry a 22 bit preamble that is not part of the stored payload
     const uint8_t payload_bits = long_frame ? 64 : instance->generic.data_count_bit;
     const uint8_t frame_bits =
         (uint8_t)(payload_bits + (long_frame ? SECPLUS_V2_86_PREAMBLE_BIT : 0));
 
     const size_t size_upload =
         ((size_t)frame_bits * 2u + 2u + (long_frame ? SECPLUS_V2_86_LEAD_IN : 0u)) * 2u;
-    // Not encoder.size_upload: that holds the capacity only until the first upload
-    // replaces it with the length actually emitted, and an 86 bit frame that followed a
-    // 62 bit one on the same encoder would then be refused a buffer it does fit in.
     if(size_upload > SECPLUS_V2_ENCODER_UPLOAD_SIZE) {
         FURI_LOG_E(TAG, "Size upload exceeds allocated encoder buffer.");
         return false;
     }
 
-    /* Both a keypad and a remote put packet id 1 on the air first, then id 0, and
-     * repeat that pair. The decoder latches id 0 and completes on id 1, so it needs one
-     * frame more than it used to before a transmission of ours pairs up; every repeat
-     * count in use here is well above that. */
     subghz_protocol_encoder_secplus_v2_emit_packet(
         instance, &index, instance->generic.data, payload_bits, 1, long_frame);
     subghz_protocol_encoder_secplus_v2_emit_packet(
@@ -958,7 +848,6 @@ SubGhzProtocolStatus
                 break;
             }
 
-            // Save original button for later use
             if(subghz_custom_btn_get_original() == 0) {
                 subghz_custom_btn_set_original(instance->generic.btn);
             }
@@ -1071,15 +960,11 @@ void subghz_protocol_decoder_secplus_v2_reset(void* context) {
     // SubGhzProtocolDecoderSecPlus_v2* instance = context;
     // does not reset the decoder because you need to get 2 parts of the package
 
-    // a PIN left over from a loaded file does not belong to what is about to arrive
     secplus_v2_pin = SECPLUS_V2_PIN_UNSET;
 }
 
 static bool subghz_protocol_secplus_v2_check_packet(SubGhzProtocolDecoderSecPlus_v2* instance) {
     if(instance->decoder.decode_count_bit == SECPLUS_V2_86_COUNT_BIT) {
-        /* 86 bit frame: 22 bits of preamble (0x3C | packet id) then 64 bits of payload.
-         * The decoder only ever keeps the last 64 bits, the packet id was latched
-         * separately once 22 bits had been shifted in. */
         if((instance->decoder.decode_data >> 62) != 1) return false;
         if(instance->packet_id == 0) {
             instance->secplus_packet_1 = instance->decoder.decode_data;
@@ -1168,9 +1053,6 @@ void subghz_protocol_decoder_secplus_v2_feed(void* context, bool level, uint32_t
                 if((instance->secplus_packet_1_count_bit == SECPLUS_V2_86_COUNT_BIT) &&
                    (duration >
                     (subghz_protocol_secplus_v2_const.te_long * 1UL * SECPLUS_V2_PAIR_TIMEOUT))) {
-                    // a keypad half this old cannot belong to whatever arrives next. 62 bit
-                    // halves are left alone: they are routinely paired across repeats of the
-                    // same transmission, which is what carries a weak signal.
                     instance->secplus_packet_1 = 0;
                     instance->secplus_packet_1_count_bit = 0;
                 }
@@ -1214,8 +1096,6 @@ void subghz_protocol_decoder_secplus_v2_feed(void* context, bool level, uint32_t
             if(data_ok) {
                 instance->decoder.decode_data = (instance->decoder.decode_data << 1) | data;
                 instance->decoder.decode_count_bit++;
-                // the 86 bit frame drops its preamble off the top of the accumulator,
-                // so remember the packet id while it is still there
                 if(instance->decoder.decode_count_bit == SECPLUS_V2_86_PREAMBLE_BIT) {
                     instance->packet_id = (uint8_t)(instance->decoder.decode_data & 0x03);
                 }
@@ -1232,9 +1112,6 @@ SubGhzProtocolStatus subghz_protocol_decoder_secplus_v2_serialize(
     furi_assert(context);
     SubGhzProtocolDecoderSecPlus_v2* instance = context;
 
-    /* Recover the PIN before the generic block goes out. remote_controller_86() is also
-     * what fills in serial, counter and button, so doing it here means a Save that never
-     * passed through the info screen still stores them. */
     uint16_t pin = SECPLUS_V2_PIN_UNSET;
     if(instance->generic.data_count_bit == SECPLUS_V2_86_COUNT_BIT) {
         uint32_t data_word = 0;
@@ -1261,9 +1138,6 @@ SubGhzProtocolStatus subghz_protocol_decoder_secplus_v2_serialize(
 
     if((ret == SubGhzProtocolStatusOk) &&
        (instance->generic.data_count_bit == SECPLUS_V2_86_COUNT_BIT)) {
-        /* Written last so it stays on the last line of the file: it is the one field a
-         * user edits by hand, and the PIN app updates it in place. A PIN that cannot be
-         * read stays blank, for the user or the PIN app to fill in. */
         FuriString* pin_str = furi_string_alloc();
         if(pin <= SECPLUS_V2_PIN_MAX) furi_string_printf(pin_str, "%04u", pin);
         if(!flipper_format_write_string(flipper_format, "Pin", pin_str)) {
@@ -1281,7 +1155,6 @@ SubGhzProtocolStatus
     furi_assert(context);
     SubGhzProtocolDecoderSecPlus_v2* instance = context;
     SubGhzProtocolStatus ret = SubGhzProtocolStatusError;
-    // drop the previous signal's PIN first, so no exit from here can leave it standing
     secplus_v2_pin = SECPLUS_V2_PIN_UNSET;
     do {
         ret = subghz_block_generic_deserialize(&instance->generic, flipper_format);
@@ -1433,14 +1306,11 @@ void subghz_protocol_decoder_secplus_v2_get_string(void* context, FuriString* ou
         subghz_block_generic_global.current_btn = instance->generic.btn;
         subghz_block_generic_global.btn_length_bit = 8;
 
-        // a loaded file's "Pin" wins, otherwise use the one the frame itself carries
         uint16_t pin = secplus_v2_pin;
         if(pin > SECPLUS_V2_PIN_MAX) pin = subghz_protocol_secplus_v2_pin_extract(data_word);
         if(ok && (pin <= SECPLUS_V2_PIN_MAX)) {
             furi_string_cat_printf(
                 output,
-                /* The Save button occupies the bottom right 12 rows, so the last line
-                 * has to stay short. Cnt moves up next to Sn to make room for Pin. */
                 "%s %db\r\n"
                 "Pk1:%lX%08lX\r\n"
                 "Pk2:%lX%08lX\r\n"

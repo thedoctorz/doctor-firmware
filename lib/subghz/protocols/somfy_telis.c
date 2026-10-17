@@ -105,7 +105,7 @@ static bool subghz_protocol_somfy_telis_gen_data(
     }
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(btn);
     }
 
@@ -193,7 +193,7 @@ bool subghz_protocol_somfy_telis_create_data(
 /**
  * Generating an upload from data.
  * @param instance Pointer to a SubGhzProtocolEncoderSomfyTelis instance
- * @return true Always; this encoder has no failure path
+ * @return true On success
  */
 static bool subghz_protocol_encoder_somfy_telis_get_upload(
     SubGhzProtocolEncoderSomfyTelis* instance,
@@ -582,7 +582,7 @@ static void subghz_protocol_somfy_telis_check_remote_controller(SubGhzBlockGener
     instance->serial = data & 0xFFFFFF; // address
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
     subghz_custom_btn_set_max(3);

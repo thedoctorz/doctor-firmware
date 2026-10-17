@@ -9,6 +9,9 @@
 #include <stdbool.h>
 #include <gap.h>
 #include <extra_beacon.h>
+/* GAP central/observer roles, usable from apps on the "ble_full" radio stack */
+#include <gap_scan.h>
+#include <gap_central.h>
 #include <furi_ble/profile_interface.h>
 #include <ble_glue.h>
 #include <ble_app.h>

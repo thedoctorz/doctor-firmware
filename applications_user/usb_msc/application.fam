@@ -1,0 +1,17 @@
+App(
+    appid="usb_msc",
+    name="USB Storage",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="usb_msc_app",
+    requires=["gui", "storage", "notification"],
+    stack_size=2 * 1024,
+    order=13,
+    icon="A_UsbMsc_14",
+    fap_exclude_libs=["gcc"],
+    fap_category="USB",
+    fap_version="1.0",
+    fap_author="@thedoctorz",
+    fap_weburl="https://github.com/thedoctorz/doctor-firmware",
+    fap_icon="icon.png",
+    fap_description="True USB mass storage: expose the SD card to a host as a removable drive",
+)

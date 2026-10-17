@@ -1,18 +1,10 @@
-/**
- * @file menu_style_helpers.h
- * Shared helpers for main menu style plugins.
- *
- * Most of the layouts in this directory are ported from Momentum Firmware's built-in menu
- * styles (https://github.com/Next-Flip/Momentum-Firmware, GPL-3.0), reworked to ship as
- * plugins. Each file names its author.
- */
-
 #pragma once
 
 #include <furi.h>
 #include <gui/elements.h>
 #include <gui/modules/menu.h>
 #include <flipper_application/flipper_application.h>
+#include <stdio.h>
 
 #define MENU_STYLE_PLUGIN(menu_style, menu_style_ep)                         \
     static const FlipperAppPluginDescriptor menu_style_plugin_descriptor = { \
@@ -24,11 +16,6 @@
         return &menu_style_plugin_descriptor;                                \
     }
 
-/** Item label, optionally shortened for a layout too narrow to scroll it comfortably.
- * Only the stock names that do not fit are special-cased; anything else is returned as-is. These
- * are the name= fields of applications/main/lfrfid and .../subghz - rename either and the
- * shortening silently stops matching.
- */
 static inline const char* menu_style_label(const MenuItem* item, bool shorter) {
     if(shorter) {
         if(strcmp(item->label, "125 kHz RFID") == 0) return "RFID";
@@ -86,10 +73,6 @@ static inline size_t menu_style_navigate_list(const MenuModel* model, InputKey k
     return model->position;
 }
 
-/** Jump to the other column of a two-column page of `rows` items each. The right column of the
- * last page can be empty, and then there is nowhere to go sideways at all; otherwise clamp into
- * it. Pass the column height rather than the page size so an odd page cannot be expressed.
- */
 static inline size_t menu_style_navigate_two_columns(const MenuModel* model, size_t rows) {
     size_t position = model->position;
     size_t right_column = position - (position % (rows * 2)) + rows;

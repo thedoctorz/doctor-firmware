@@ -2,6 +2,8 @@
 
 #include "protocols/base.h"
 #include "registry.h"
+#include "blocks/encoder.h"
+#include "protocols/vag.h"
 
 struct SubGhzTransmitter {
     const SubGhzProtocol* protocol;
@@ -61,4 +63,25 @@ SubGhzProtocolStatus
 LevelDuration subghz_transmitter_yield(void* context) {
     SubGhzTransmitter* instance = context;
     return instance->protocol->encoder->yield(instance->protocol_instance);
+}
+
+bool subghz_transmitter_get_upload(
+    SubGhzTransmitter* instance,
+    const LevelDuration** upload,
+    size_t* size) {
+    furi_check(instance);
+    furi_check(upload);
+    furi_check(size);
+
+    if(!instance->protocol || !instance->protocol->encoder ||
+       !instance->protocol->encoder->yield || !instance->protocol_instance) {
+        return false;
+    }
+
+    if(!strcmp(instance->protocol->name, SUBGHZ_PROTOCOL_VAG_NAME)) {
+        return subghz_protocol_encoder_vag_get_upload(instance->protocol_instance, upload, size);
+    }
+
+    return subghz_protocol_blocks_get_upload_from_encoder(
+        instance->protocol_instance, upload, size);
 }

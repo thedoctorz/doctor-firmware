@@ -77,3 +77,12 @@ node_modules/
 # cli_perf script output in case of errors
 /block.bin
 /return_block.bin
+
+.claude/
+
+.si4463_dev/
+
+/applications/main/extra_resources/resources/apps/*
+!/applications/main/extra_resources/resources/apps/.gitkeep
+/applications/main/extra_resources/resources/apps_data/*
+!/applications/main/extra_resources/resources/apps_data/.gitkeep

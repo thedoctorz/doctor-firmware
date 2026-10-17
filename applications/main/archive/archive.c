@@ -25,6 +25,7 @@ ArchiveApp* archive_alloc(void) {
     archive->loader = furi_record_open(RECORD_LOADER);
     archive->fav_move_str = furi_string_alloc();
     archive->dst_path = furi_string_alloc();
+    archive->search_restore_path = furi_string_alloc();
 
     archive->scene_manager = scene_manager_alloc(&archive_scene_handlers, archive);
     archive->view_dispatcher = view_dispatcher_alloc();
@@ -59,8 +60,20 @@ ArchiveApp* archive_alloc(void) {
     return archive;
 }
 
+void archive_search_stop(ArchiveApp* archive) {
+    if(archive->browser) {
+        archive->browser->search_running = false;
+    }
+    scene_manager_set_scene_state(archive->scene_manager, ArchiveAppSceneSearch, false);
+    if(!archive->search_thread) return;
+    furi_thread_join(archive->search_thread);
+    furi_thread_free(archive->search_thread);
+    archive->search_thread = NULL;
+}
+
 void archive_free(ArchiveApp* archive) {
     furi_assert(archive);
+    archive_search_stop(archive);
     ViewDispatcher* view_dispatcher = archive->view_dispatcher;
 
     // Loading
@@ -83,6 +96,7 @@ void archive_free(ArchiveApp* archive) {
     browser_free(archive->browser);
     furi_string_free(archive->fav_move_str);
     furi_string_free(archive->dst_path);
+    furi_string_free(archive->search_restore_path);
 
     furi_record_close(RECORD_DIALOGS);
     archive->dialogs = NULL;

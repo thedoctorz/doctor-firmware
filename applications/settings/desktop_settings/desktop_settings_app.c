@@ -7,10 +7,9 @@
 #include <power/power_service/power.h>
 #include <storage/storage.h>
 #include <flipper_application/flipper_application.h>
+#include <flipper_application/application_manifest.h>
 #include <loader/loader.h>
-
-#include <desktop/desktop.h>
-#include <desktop/views/desktop_view_pin_input.h>
+#include <stdlib.h>
 
 #include <desktop/desktop.h>
 #include <desktop/views/desktop_view_pin_input.h>
@@ -20,8 +19,6 @@
 
 #define TAG "DesktopSettings"
 
-// variable_item_list_add() takes a uint8_t values count, and the start scene passes
-// menu_styles_count plus one for "Default" - this is what stops that from wrapping
 #define MENU_STYLES_MAX (UINT8_MAX - 1)
 
 static void desktop_settings_menu_styles_free(DesktopSettingsApp* app);
@@ -40,13 +37,11 @@ void desktop_settings_menu_styles_load(DesktopSettingsApp* app) {
 
     if(storage_dir_open(dir, LOADER_MENU_STYLES_PATH)) {
         while(storage_dir_read(dir, NULL, file, sizeof(file))) {
-            // The directory holds every loader plugin, so filter on the menu style appid prefix
             furi_string_set_str(file_name, file);
             if(!furi_string_start_with_str(file_name, LOADER_MENU_STYLE_PREFIX) ||
                !furi_string_end_with_str(file_name, ".fal")) {
                 continue;
             }
-            // This one is a menu style we cannot offer, rather than something we filtered out
             if(furi_string_size(file_name) >= sizeof(app->settings.menu_style)) {
                 FURI_LOG_W(TAG, "Menu style name too long, ignoring %s", file);
                 continue;
@@ -71,9 +66,6 @@ void desktop_settings_menu_styles_load(DesktopSettingsApp* app) {
             app->menu_styles[pos].name = furi_string_alloc_set(name);
             app->menu_styles_count++;
         }
-        // storage_dir_read() reports the end of the directory and a failed read the same way,
-        // so ask which it was: draining leaves FSE_NOT_EXIST, the cap break above leaves FSE_OK,
-        // and anything else means a card went away mid-scan and the list is short
         FS_Error error = storage_file_get_error(dir);
         if(error == FSE_OK || error == FSE_NOT_EXIST) {
             app->menu_styles_loaded = true;
@@ -86,9 +78,6 @@ void desktop_settings_menu_styles_load(DesktopSettingsApp* app) {
                 filesystem_api_error_get_desc(error));
         }
     } else {
-        // Not the same as having no styles installed - leave it uncached so that a card which
-        // shows up later, or a directory that is not there yet, is picked up the next time the
-        // scene is entered
         FURI_LOG_W(TAG, "Cannot open %s, no menu styles offered", LOADER_MENU_STYLES_PATH);
     }
 
@@ -126,6 +115,7 @@ static bool desktop_settings_back_event_callback(void* context) {
 DesktopSettingsApp* desktop_settings_app_alloc(void) {
     DesktopSettingsApp* app = malloc(sizeof(DesktopSettingsApp));
 
+    app->main_menu_apps = NULL;
     app->gui = furi_record_open(RECORD_GUI);
     app->dialogs = furi_record_open(RECORD_DIALOGS);
     app->view_dispatcher = view_dispatcher_alloc();
@@ -139,9 +129,6 @@ DesktopSettingsApp* desktop_settings_app_alloc(void) {
 
     view_dispatcher_attach_to_gui(app->view_dispatcher, app->gui, ViewDispatcherTypeFullscreen);
 
-    // Claim the screen at the first moment we are able to. Until a view is current the ViewPort
-    // stays disabled and the GUI draws whatever is underneath - the menu we were opened from -
-    // and the loader lets go of its own loading animation as soon as this thread starts.
     view_dispatcher_show_loading(app->view_dispatcher);
 
     app->popup = popup_alloc();
@@ -229,6 +216,7 @@ void desktop_settings_app_free(DesktopSettingsApp* app) {
     desktop_settings_view_pin_setup_howto2_free(app->pin_setup_howto2_view);
     dialog_ex_free(app->dialog_ex);
     desktop_settings_menu_styles_free(app);
+    if(app->main_menu_apps) main_menu_apps_free(app->main_menu_apps);
     // View dispatcher
     view_dispatcher_free(app->view_dispatcher);
     scene_manager_free(app->scene_manager);

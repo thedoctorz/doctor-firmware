@@ -542,6 +542,28 @@ size_t xPortGetMinimumEverFreeHeapSize(void) {
 void xPortResetHeapMinimumEverFreeHeapSize(void) {
     xMinimumEverFreeBytesRemaining = xFreeBytesRemaining;
 }
+
+size_t memmgr_heap_get_block_size(void* ptr) {
+    if(ptr == NULL) {
+        return 0;
+    }
+
+    uint8_t* puc = (uint8_t*)ptr;
+    puc -= xHeapStructSize;
+    BlockLink_t* pxLink = (void*)puc;
+
+    heapVALIDATE_BLOCK_POINTER(pxLink);
+    if(heapBLOCK_IS_ALLOCATED(pxLink) == 0) {
+        return 0;
+    }
+
+    size_t block_size = pxLink->xBlockSize & ~heapBLOCK_ALLOCATED_BITMASK;
+    if(heapSUBTRACT_WILL_UNDERFLOW(block_size, xHeapStructSize)) {
+        return 0;
+    }
+
+    return block_size - xHeapStructSize;
+}
 /*-----------------------------------------------------------*/
 
 void vPortInitialiseBlocks(void) {

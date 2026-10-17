@@ -13,6 +13,7 @@
 #include <cli/cli_main_commands.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <m-dict.h>
 
 #include <bt/bt_service/bt.h>
@@ -71,6 +72,10 @@ static RpcSystemCallbacks rpc_systems[] = {
         .alloc = rpc_network_alloc,
         .free = rpc_network_free,
     },
+    {
+        .alloc = rpc_subghz_alloc,
+        .free = rpc_subghz_free,
+    },
 };
 
 struct RpcSession {
@@ -101,6 +106,11 @@ struct Rpc {
 RpcOwner rpc_session_get_owner(RpcSession* session) {
     furi_check(session);
     return session->owner;
+}
+
+bool rpc_session_is_closed(RpcSession* session) {
+    furi_check(session);
+    return session->terminate || session->send_bytes_callback == NULL;
 }
 
 static void rpc_close_session_process(const PB_Main* request, void* context) {
@@ -208,8 +218,9 @@ bool rpc_pb_stream_read(pb_istream_t* istream, pb_byte_t* buf, size_t count) {
     while(1) {
         bytes_received += furi_stream_buffer_receive(
             session->stream, buf + bytes_received, count - bytes_received, 0);
-        if(furi_stream_buffer_is_empty(session->stream)) {
-            if(session->buffer_is_empty_callback) {
+        if(session->buffer_is_empty_callback) {
+            size_t available = furi_stream_buffer_spaces_available(session->stream);
+            if(available >= (RPC_BUFFER_SIZE / 2)) {
                 session->buffer_is_empty_callback(session->context);
             }
         }
@@ -346,6 +357,9 @@ static int32_t rpc_session_worker(void* context) {
         }
 
         pb_release(&PB_Main_msg, session->decoded_message);
+        memset(session->decoded_message, 0, sizeof(PB_Main));
+        session->decoded_message->cb_content.funcs.decode = rpc_pb_content_callback;
+        session->decoded_message->cb_content.arg = session;
 
         if(session->terminate) {
             FURI_LOG_D(TAG, "Session terminated");
@@ -402,7 +416,7 @@ RpcSession* rpc_session_open(Rpc* rpc, RpcOwner owner) {
     session->owner = owner;
     RpcHandlerDict_init(session->handlers);
 
-    session->decoded_message = malloc(sizeof(PB_Main));
+    session->decoded_message = rpc_message_alloc();
     session->decoded_message->cb_content.funcs.decode = rpc_pb_content_callback;
     session->decoded_message->cb_content.arg = session;
 
@@ -418,7 +432,7 @@ RpcSession* rpc_session_open(Rpc* rpc, RpcOwner owner) {
     };
     rpc_add_handler(session, PB_Main_stop_session_tag, &rpc_handler);
 
-    session->thread = furi_thread_alloc_ex("RpcSessionWorker", 3072, rpc_session_worker, session);
+    session->thread = furi_thread_alloc_ex("RpcSessionWorker", 6144, rpc_session_worker, session);
 
     furi_thread_set_state_context(session->thread, session);
     furi_thread_set_state_callback(session->thread, rpc_session_thread_state_callback);
@@ -440,11 +454,10 @@ void rpc_session_close(RpcSession* session) {
 
 void rpc_on_system_start(void* p) {
     UNUSED(p);
+    rpc_system_app_init();
     Rpc* rpc = malloc(sizeof(Rpc));
 
     rpc->busy_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
-
-    rpc_system_app_init();
 
     CliRegistry* registry = furi_record_open(RECORD_CLI);
     cli_registry_add_command(
@@ -504,13 +517,12 @@ void rpc_send_and_release(RpcSession* session, PB_Main* message) {
 void rpc_send_and_release_empty(RpcSession* session, uint32_t command_id, PB_CommandStatus status) {
     furi_assert(session);
 
-    PB_Main message = {
-        .command_id = command_id,
-        .command_status = status,
-        .has_next = false,
-        .which_content = PB_Main_empty_tag,
-    };
+    PB_Main* message = rpc_message_alloc();
+    message->command_id = command_id;
+    message->command_status = status;
+    message->has_next = false;
+    message->which_content = PB_Main_empty_tag;
 
-    rpc_send_and_release(session, &message);
-    pb_release(&PB_Main_msg, &message);
+    rpc_send_and_release(session, message);
+    free(message);
 }

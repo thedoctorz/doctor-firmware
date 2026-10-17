@@ -48,6 +48,11 @@ typedef enum {
     KingGates_stylo_4kDecoderStepCheckDuration,
 } KingGates_stylo_4kDecoderStep;
 
+static SubGhzProtocolStatus subghz_protocol_decoder_kinggates_stylo_4k_serialize(
+    void* context,
+    FlipperFormat* flipper_format,
+    SubGhzRadioPreset* preset);
+
 const SubGhzProtocolDecoder subghz_protocol_kinggates_stylo_4k_decoder = {
     .alloc = subghz_protocol_decoder_kinggates_stylo_4k_alloc,
     .free = subghz_protocol_decoder_common_free,
@@ -56,7 +61,7 @@ const SubGhzProtocolDecoder subghz_protocol_kinggates_stylo_4k_decoder = {
     .reset = subghz_protocol_decoder_common_reset,
 
     .get_hash_data = subghz_protocol_decoder_common_get_hash_data,
-    .serialize = subghz_protocol_decoder_common_serialize_data_2,
+    .serialize = subghz_protocol_decoder_kinggates_stylo_4k_serialize,
     .deserialize = subghz_protocol_decoder_kinggates_stylo_4k_deserialize,
     .get_string = subghz_protocol_decoder_kinggates_stylo_4k_get_string,
 };
@@ -121,7 +126,7 @@ static bool subghz_protocol_kinggates_stylo_4k_gen_data(
     SubGhzProtocolEncoderKingGates_stylo_4k* instance,
     uint8_t btn) {
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(btn);
     }
 
@@ -223,7 +228,7 @@ bool subghz_protocol_kinggates_stylo_4k_create_data(
 /**
  * Generating an upload from data.
  * @param instance Pointer to a SubGhzProtocolEncoderKingGates_stylo_4k instance
- * @return true Always; this encoder has no failure path
+ * @return true On success
  */
 static bool subghz_protocol_encoder_kinggates_stylo_4k_get_upload(
     SubGhzProtocolEncoderKingGates_stylo_4k* instance,
@@ -518,7 +523,7 @@ static void subghz_protocol_kinggates_stylo_4k_remote_controller(
     if(ret) {
         instance->cnt = decrypt & 0xFFFF;
         // Save original button for later use
-        if(subghz_custom_btn_get_original() == 0) {
+        if(!subghz_custom_btn_has_original()) {
             subghz_custom_btn_set_original(instance->btn);
         }
         subghz_custom_btn_set_max(3);
@@ -527,6 +532,16 @@ static void subghz_protocol_kinggates_stylo_4k_remote_controller(
         instance->serial = 0;
         instance->cnt = 0;
     }
+}
+
+SubGhzProtocolStatus subghz_protocol_decoder_kinggates_stylo_4k_serialize(
+    void* context,
+    FlipperFormat* flipper_format,
+    SubGhzRadioPreset* preset) {
+    furi_assert(context);
+    SubGhzProtocolDecoderKingGates_stylo_4k* instance = context;
+    subghz_protocol_kinggates_stylo_4k_remote_controller(&instance->generic, instance->keystore);
+    return subghz_protocol_decoder_common_serialize_data_2(context, flipper_format, preset);
 }
 
 SubGhzProtocolStatus subghz_protocol_decoder_kinggates_stylo_4k_deserialize(

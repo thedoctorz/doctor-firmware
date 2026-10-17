@@ -29,6 +29,11 @@ typedef enum {
     SubGhzHopperStateRSSITimeOut,
 } SubGhzHopperState;
 
+typedef enum {
+    SubGhzHopperModeFrequency,
+    SubGhzHopperModePreset,
+} SubGhzHopperMode;
+
 /** SubGhzSpeakerState state */
 typedef enum {
     SubGhzSpeakerStateDisable,
@@ -79,6 +84,7 @@ typedef enum {
     SubGhzViewIdPopup,
     SubGhzViewIdTextInput,
     SubGhzViewIdByteInput,
+    SubGhzViewIdNumberInput,
     SubGhzViewIdWidget,
     SubGhzViewIdTransmitter,
     SubGhzViewIdVariableItemList,
@@ -98,6 +104,12 @@ typedef enum {
     SubGhzViewReceiverModeLive,
     SubGhzViewReceiverModeFile,
 } SubGhzViewReceiverMode;
+
+typedef enum {
+    SubGhzHistoryButtonIconDefault,
+    SubGhzHistoryButtonIconLock,
+    SubGhzHistoryButtonIconUnlock,
+} SubGhzHistoryButtonIcon;
 
 typedef enum {
     SubGhzDecodeRawStateStart,

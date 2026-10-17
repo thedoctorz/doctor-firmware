@@ -1,12 +1,3 @@
-/*
- * Security+ PIN — test the keypad PIN of a captured Security+ 2.0 86-bit signal.
- *
- * An 86 bit Security+ 2.0 frame is a keypad transmission. The PIN lives in the top
- * half of the frame's data word. 
- * This app loads such a file, lets you set a PIN by hand or sweep 0000..9999,
- * transmits each candidate, and writes the PIN back into the file once you find it.
- */
-
 #include <furi.h>
 #include <furi_hal.h>
 #include <gui/gui.h>
@@ -42,9 +33,7 @@ typedef struct {
     SecPlusPinScene scene;
     uint8_t menu_index;
 
-    // loaded signal
     bool loaded;
-    /* set only by a successful save, so that result survives unloading the file */
     bool pin_saved;
     FuriString* file_path;
     FuriString* status;
@@ -53,15 +42,12 @@ typedef struct {
     uint32_t bit_count;
     SecPlusPinPreset preset;
 
-    // editor
     uint16_t pin;
-    uint8_t digit; // 0 = most significant
+    uint8_t digit;
     bool sweeping;
     bool tx_busy;
     uint16_t sweep_from;
 } SecPlusPin;
-
-/* ------------------------------------------------------------------ drawing */
 
 static void secplus_pin_draw_menu(Canvas* canvas, SecPlusPin* app) {
     static const char* items[] = {"Open .sub file", "Exit"};
@@ -78,16 +64,9 @@ static void secplus_pin_draw_menu(Canvas* canvas, SecPlusPin* app) {
     canvas_draw_str(canvas, 4, 62, furi_string_get_cstr(app->status));
 }
 
-/*
- * Vertical budget below the title rule is y=13..51, with the Send button owning 52..64.
- * FontBigNumbers is 15 tall, FontPrimary 8, FontSecondary 7, all measured up from the
- * baseline, so the digits get 14..29, the bordered info box 32..51, and the two lines
- * inside it sit on baselines 9 apart with no overlap.
- */
 static void secplus_pin_draw_edit(Canvas* canvas, SecPlusPin* app) {
     char buf[48];
 
-    // the four PIN digits, with a cursor under the active one
     canvas_set_font(canvas, FontBigNumbers);
     for(uint8_t i = 0; i < 4; i++) {
         uint16_t div = 1;
@@ -102,7 +81,6 @@ static void secplus_pin_draw_edit(Canvas* canvas, SecPlusPin* app) {
     }
 
     if(app->sweeping) {
-        // how far through 0000..9999 the sweep has walked from where it started
         const uint16_t done =
             (uint16_t)((app->pin + PIN_MAX + 1u - app->sweep_from) % (PIN_MAX + 1u));
         snprintf(buf, sizeof(buf), "%04u  of  %04u", done, PIN_MAX);
@@ -113,13 +91,10 @@ static void secplus_pin_draw_edit(Canvas* canvas, SecPlusPin* app) {
     }
 
     elements_frame(canvas, 0, 32, 128, 20);
-    // the status gets the heavier font, the controls the lighter one
     canvas_set_font(canvas, FontPrimary);
     canvas_draw_str_aligned(
         canvas, 64, 41, AlignCenter, AlignBottom, furi_string_get_cstr(app->status));
     canvas_set_font(canvas, FontSecondary);
-    /* Left and Right move the cursor, so only OK is free to carry a button and the two
-     * hold actions have to be spelled out instead. */
     canvas_draw_str_aligned(canvas, 64, 50, AlignCenter, AlignBottom, "hold OK sweep   < save");
     elements_button_center(canvas, "Send");
 }
@@ -130,15 +105,6 @@ static void secplus_pin_draw_callback(Canvas* canvas, void* ctx) {
     canvas_clear(canvas);
     canvas_set_font(canvas, FontPrimary);
     canvas_draw_str(canvas, 2, 9, "Security+ PIN");
-    /* Which radio served the last send, boxed so it does not read as part of the title.
-     * The box is sized to the text, so Int does not leave a gap. */
-    canvas_set_font(canvas, FontSecondary);
-    const char* radio = secplus_pin_radio_is_external() ? "Ext" : "Int";
-    size_t radio_w = canvas_string_width(canvas, radio) + 6;
-    int32_t radio_x = 127 - (int32_t)radio_w;
-    elements_frame(canvas, radio_x, 0, radio_w, 12);
-    canvas_draw_str(canvas, radio_x + 3, 9, radio);
-    canvas_set_font(canvas, FontPrimary);
     canvas_draw_line(canvas, 0, 12, 128, 12);
     canvas_set_font(canvas, FontSecondary);
     if(app->scene == SecPlusPinSceneMenu) {
@@ -153,8 +119,6 @@ static void secplus_pin_input_callback(InputEvent* event, void* ctx) {
     FuriMessageQueue* queue = ctx;
     furi_message_queue_put(queue, event, FuriWaitForever);
 }
-
-/* ------------------------------------------------------------------- loading */
 
 static bool secplus_pin_load(SecPlusPin* app, const char* path) {
     bool ok = false;
@@ -234,7 +198,6 @@ static bool secplus_pin_load(SecPlusPin* app, const char* path) {
             break;
         }
 
-        // an already known PIN is picked up so you can resend it
         app->pin = 0;
         if(flipper_format_rewind(fff) && flipper_format_read_string(fff, "Pin", tmp)) {
             furi_string_trim(tmp);
@@ -254,7 +217,6 @@ static bool secplus_pin_load(SecPlusPin* app, const char* path) {
     return ok;
 }
 
-/* Build the in-memory signal for the current PIN and transmit it once. */
 static SecPlusPinTxStatus secplus_pin_transmit(SecPlusPin* app) {
     char pin_str[8];
     SecPlusPinTxStatus status = SecPlusPinTxError;
@@ -271,10 +233,6 @@ static SecPlusPinTxStatus secplus_pin_transmit(SecPlusPin* app) {
         if(!flipper_format_write_string_cstr(fff, "Pin", pin_str)) break;
         status = secplus_pin_radio_tx(&app->preset, fff);
 
-        /* The encoder advances the counter and writes both halves back. Keeping them
-         * makes every attempt carry a fresh counter, the way a real keypad does; reusing
-         * the loaded frame would replay one counter 10000 times and the receiver would
-         * ignore all but the first. */
         if(status == SecPlusPinTxOk) {
             uint8_t key[8];
             uint8_t packet_1[8];
@@ -291,9 +249,6 @@ static SecPlusPinTxStatus secplus_pin_transmit(SecPlusPin* app) {
     return status;
 }
 
-/* Write the PIN back, together with the counter the transmissions have reached.
- * Saving the PIN alone would leave the file holding the counter it was captured
- * with, so the next load would replay counters the receiver has already seen. */
 static bool secplus_pin_save(SecPlusPin* app) {
     char pin_str[8];
     snprintf(pin_str, sizeof(pin_str), "%04u", app->pin);
@@ -308,9 +263,6 @@ static bool secplus_pin_save(SecPlusPin* app) {
     return ok;
 }
 
-/* --------------------------------------------------------------------- input */
-
-/* Tell the user, in a modal they have to dismiss, why the file was rejected. */
 static void secplus_pin_show_error(SecPlusPin* app, const char* reason) {
     DialogMessage* message = dialog_message_alloc();
     dialog_message_set_header(message, "Wrong file", 64, 3, AlignCenter, AlignTop);
@@ -335,7 +287,6 @@ static void secplus_pin_open_file(SecPlusPin* app) {
             app->digit = 0;
             app->scene = SecPlusPinSceneEdit;
         } else {
-            /* status now holds the reason the parser stopped */
             secplus_pin_show_error(app, furi_string_get_cstr(app->status));
         }
     }
@@ -351,8 +302,6 @@ static void secplus_pin_pin_step(SecPlusPin* app, int8_t delta) {
     app->pin = (uint16_t)(app->pin - ((app->pin / div) % 10) * div + d * div);
     if(app->pin > PIN_MAX) app->pin = PIN_MAX;
 }
-
-/* ---------------------------------------------------------------------- main */
 
 int32_t secplus_pin_app(void* p) {
     UNUSED(p);
@@ -382,8 +331,6 @@ int32_t secplus_pin_app(void* p) {
     memset(app->key, 0, sizeof(app->key));
     memset(app->packet_1, 0, sizeof(app->packet_1));
 
-    secplus_pin_radio_open();
-
     app->view_port = view_port_alloc();
     view_port_draw_callback_set(app->view_port, secplus_pin_draw_callback, app);
     view_port_input_callback_set(app->view_port, secplus_pin_input_callback, app->queue);
@@ -393,7 +340,6 @@ int32_t secplus_pin_app(void* p) {
     bool running = true;
     InputEvent event;
     while(running) {
-        // in sweep mode we do not block: transmit, advance, repeat
         FuriStatus status =
             furi_message_queue_get(app->queue, &event, app->sweeping ? 0 : FuriWaitForever);
 
@@ -425,7 +371,7 @@ int32_t secplus_pin_app(void* p) {
                         break;
                     }
                 }
-            } else { // edit
+            } else {
                 if(app->sweeping && ((event.key == InputKeyOk) || (event.key == InputKeyBack)) &&
                    (event.type == InputTypeShort)) {
                     app->sweeping = false;
@@ -465,8 +411,6 @@ int32_t secplus_pin_app(void* p) {
                     case InputKeyBack:
                         app->scene = SecPlusPinSceneMenu;
                         app->loaded = false;
-                        /* "315MHz ready" describes a file that is no longer open; a save
-                         * result is the outcome the user was after, so that one stays */
                         if(!app->pin_saved) furi_string_set(app->status, "No file loaded");
                         break;
                     default:
@@ -501,7 +445,6 @@ int32_t secplus_pin_app(void* p) {
             const SecPlusPinTxStatus sent = secplus_pin_transmit(app);
 
             furi_mutex_acquire(app->mutex, FuriWaitForever);
-            /* a sweep that cannot transmit would silently walk all 10000 PINs */
             if(sent != SecPlusPinTxOk) {
                 app->sweeping = false;
                 furi_string_set(
@@ -523,7 +466,6 @@ int32_t secplus_pin_app(void* p) {
         }
     }
 
-    secplus_pin_radio_close();
     gui_remove_view_port(app->gui, app->view_port);
     view_port_free(app->view_port);
     furi_record_close(RECORD_GUI);

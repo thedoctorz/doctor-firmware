@@ -1,6 +1,7 @@
 #include "byte_input.h"
 
 #include <gui/elements.h>
+#include <gui/remote_keyboard.h>
 #include <furi.h>
 #include <assets_icons.h>
 
@@ -620,6 +621,52 @@ static void byte_input_handle_ok(ByteInputModel* model) {
  * @param      canvas  The canvas
  * @param      _model  The model
  */
+static char byte_input_hex_digit(char value) {
+    if(value >= 'a' && value <= 'f') return (char)(value - 'a' + 'A');
+    return value;
+}
+
+static bool byte_input_hex_ok(char value) {
+    value = byte_input_hex_digit(value);
+    return (value >= '0' && value <= '9') || (value >= 'A' && value <= 'F');
+}
+
+static void byte_input_remote_write_digit(ByteInputModel* model, char value) {
+    if(model->bytes == NULL || model->bytes_count == 0) return;
+    if(model->selected_byte >= model->bytes_count) return;
+    value = byte_input_hex_digit(value);
+    if(!byte_input_hex_ok(value)) return;
+    byte_input_set_nibble(model->bytes, model->selected_byte, value, model->selected_high_nibble);
+    if(model->selected_high_nibble) {
+        model->selected_high_nibble = false;
+    } else {
+        byte_input_inc_selected_byte(model);
+        model->selected_high_nibble = true;
+    }
+    byte_input_call_changed_callback(model);
+}
+
+static void byte_input_remote_step_back(ByteInputModel* model) {
+    if(model->bytes == NULL || model->bytes_count == 0) return;
+    if(!model->selected_high_nibble) {
+        model->bytes[model->selected_byte] &= 0x0F;
+        model->selected_high_nibble = true;
+    } else if(model->selected_byte > 0) {
+        byte_input_dec_selected_byte(model);
+        model->selected_high_nibble = false;
+        model->bytes[model->selected_byte] &= 0xF0;
+    }
+    byte_input_call_changed_callback(model);
+}
+
+static void byte_input_view_enter(void* context) {
+    remote_keyboard_acquire_byte(context);
+}
+
+static void byte_input_view_exit(void* context) {
+    remote_keyboard_release_byte(context);
+}
+
 static void byte_input_view_draw_callback(Canvas* canvas, void* _model) {
     ByteInputModel* model = _model;
 
@@ -815,6 +862,8 @@ ByteInput* byte_input_alloc(void) {
     view_allocate_model(byte_input->view, ViewModelTypeLocking, sizeof(ByteInputModel));
     view_set_draw_callback(byte_input->view, byte_input_view_draw_callback);
     view_set_input_callback(byte_input->view, byte_input_view_input_callback);
+    view_set_enter_callback(byte_input->view, byte_input_view_enter);
+    view_set_exit_callback(byte_input->view, byte_input_view_exit);
 
     with_view_model(
         byte_input->view,
@@ -831,8 +880,38 @@ ByteInput* byte_input_alloc(void) {
     return byte_input;
 }
 
+bool byte_input_remote_insert(ByteInput* byte_input, const char* text) {
+    furi_check(byte_input);
+    if(text == NULL) text = "";
+    with_view_model(
+        byte_input->view,
+        ByteInputModel * model,
+        {
+            for(const char* cursor = text; *cursor != '\0'; cursor++) {
+                byte_input_remote_write_digit(model, *cursor);
+            }
+        },
+        true);
+    return true;
+}
+
+bool byte_input_remote_backspace(ByteInput* byte_input) {
+    furi_check(byte_input);
+    with_view_model(
+        byte_input->view, ByteInputModel * model, { byte_input_remote_step_back(model); }, true);
+    return true;
+}
+
+bool byte_input_remote_submit(ByteInput* byte_input) {
+    furi_check(byte_input);
+    with_view_model(
+        byte_input->view, ByteInputModel * model, { byte_input_call_input_callback(model); }, true);
+    return true;
+}
+
 void byte_input_free(ByteInput* byte_input) {
     furi_check(byte_input);
+    remote_keyboard_release_byte(byte_input);
     view_free(byte_input->view);
     free(byte_input);
 }

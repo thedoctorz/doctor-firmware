@@ -242,6 +242,10 @@ void aes128_decrypt(const uint8_t* expanded_key, uint8_t* data) {
     memcpy(data, state, 16);
 }
 
+uint8_t aes_sbox_byte(uint8_t value) {
+    return aes_sbox[value];
+}
+
 void reverse_bits_in_bytes(uint8_t* data, uint8_t len) {
     for(uint8_t i = 0; i < len; i++) {
         uint8_t byte = data[i];

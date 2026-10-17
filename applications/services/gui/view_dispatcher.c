@@ -221,7 +221,6 @@ void view_dispatcher_show_loading(ViewDispatcher* view_dispatcher) {
 
     view_dispatcher_set_current_view(view_dispatcher, loading_get_view(view_dispatcher->loading));
 }
-
 void view_dispatcher_switch_to_view(ViewDispatcher* view_dispatcher, uint32_t view_id) {
     furi_check(view_dispatcher);
     if(view_id == VIEW_NONE) {

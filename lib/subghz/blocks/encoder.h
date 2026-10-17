@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include <lib/toolbox/level_duration.h>
+#include <lib/subghz/protocols/base.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,6 +62,19 @@ size_t subghz_protocol_blocks_get_upload_from_bit_array(
     size_t max_size_upload,
     uint32_t duration_bit,
     SubGhzProtocolBlockAlignBit align_bit);
+
+/**
+ * Get upload buffer from a standard block encoder instance.
+ * Expects SubGhzProtocolEncoderBase followed by SubGhzProtocolBlockEncoder.
+ * @param encoder_context Pointer to a protocol encoder instance
+ * @param upload Pointer to upload buffer
+ * @param size Upload buffer size
+ * @return true On success
+ */
+bool subghz_protocol_blocks_get_upload_from_encoder(
+    void* encoder_context,
+    const LevelDuration** upload,
+    size_t* size);
 
 #ifdef __cplusplus
 }

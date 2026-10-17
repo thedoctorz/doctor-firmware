@@ -6,8 +6,6 @@ void infrared_scene_universal_save_name_on_enter(void* context) {
     InfraredApp* infrared = context;
     TextInput* text_input = infrared->text_input;
 
-    // Offer the same generated name the learn flow would have picked, so the user can
-    // just confirm it.
     FuriString* remote_name = furi_string_alloc_set(INFRARED_DEFAULT_REMOTE_NAME);
     infrared_find_vacant_remote_name(remote_name, INFRARED_APP_FOLDER);
     infrared_text_store_set(infrared, 0, "%s", furi_string_get_cstr(remote_name));

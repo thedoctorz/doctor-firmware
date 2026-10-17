@@ -9,7 +9,8 @@
 extern "C" {
 #endif
 
-#define RPC_BUFFER_SIZE (1024)
+#define RPC_BUFFER_SIZE           (4096)
+#define RPC_STORAGE_MAX_DATA_SIZE (3072)
 
 #define RECORD_RPC "rpc"
 
@@ -45,6 +46,8 @@ typedef enum {
  * @return              session owner
  */
 RpcOwner rpc_session_get_owner(RpcSession* session);
+
+bool rpc_session_is_closed(RpcSession* session);
 
 /** Open RPC session
  *

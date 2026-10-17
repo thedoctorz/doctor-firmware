@@ -2,7 +2,9 @@
 
 #include <digital_signal/digital_sequence.h>
 
-#include <nfc/protocols/iso15693_3/iso15693_3_listener_i.h>
+// Inlined from the (removed) lib/nfc iso15693_3 listener header — the only value
+// this preset needs. Keeps digital_signal free of any lib/nfc dependency.
+#define ISO15693_3_LISTENER_BUFFER_SIZE (259U)
 
 #define BITS_IN_BYTE (8U)
 

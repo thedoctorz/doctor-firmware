@@ -211,7 +211,7 @@ static void subghz_protocol_hay21_remote_controller(SubGhzBlockGeneric* instance
     instance->cnt = (instance->data >> 1) & 0xF;
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
     subghz_custom_btn_set_max(2);

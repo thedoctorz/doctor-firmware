@@ -6,7 +6,7 @@
 	url = https://github.com/nanopb/nanopb.git
 [submodule "assets/protobuf"]
 	path = assets/protobuf
-	url = https://github.com/DarkFlippers/flipperzero-protobuf.git
+	url = https://github.com/thedoctorz/flipperzero-protobuf.git
 	shallow = false
 [submodule "lib/libusb_stm32"]
 	path = lib/libusb_stm32
@@ -34,5 +34,4 @@
 	url = https://github.com/flipperdevices/stm32wb_copro.git
 [submodule "subghz_remote"]
 	path = applications/main/subghz_remote
-	url = https://github.com/DarkFlippers/SubGHz_Remote.git
-	branch = ufw_main_app
+	url = https://github.com/thedoctorz/SubGHz_Remote.git

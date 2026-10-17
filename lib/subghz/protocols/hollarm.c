@@ -213,7 +213,7 @@ static void subghz_protocol_hollarm_remote_controller(SubGhzBlockGeneric* instan
     instance->serial = (instance->data & 0xFFFFFFF0000) >> 16;
 
     // Save original button for later use
-    if(subghz_custom_btn_get_original() == 0) {
+    if(!subghz_custom_btn_has_original()) {
         subghz_custom_btn_set_original(instance->btn);
     }
     subghz_custom_btn_set_max(3);
@@ -286,8 +286,7 @@ void subghz_protocol_decoder_hollarm_feed(void* context, bool level, volatile ui
     switch(instance->decoder.parser_step) {
     case HollarmDecoderStepReset:
         if((!level) && (DURATION_DIFF(duration, subghz_protocol_hollarm_const.te_short * 12) <
-                        subghz_protocol_hollarm_const.te_delta * 2)) {
-            //Found GAP between parcels
+                        subghz_protocol_hollarm_const.te_delta)) {
             instance->decoder.decode_data = 0;
             instance->decoder.decode_count_bit = 0;
             instance->decoder.parser_step = HollarmDecoderStepSaveDuration;
@@ -339,21 +338,17 @@ void subghz_protocol_decoder_hollarm_feed(void* context, bool level, volatile ui
                                       ((instance->generic.data >> 16) & 0xFF) +
                                       ((instance->generic.data >> 8) & 0xFF);
 
-                    if(bytesum != (instance->generic.data & 0xFF)) {
-                        // Check if the key is valid by verifying the sum
+                    if((bytesum != (instance->generic.data & 0xFF)) ||
+                       subghz_protocol_blocks_key_is_degenerate(instance->generic.data, 40)) {
                         instance->generic.data = 0;
                         instance->generic.data_count_bit = 0;
-                        instance->decoder.decode_data = 0;
-                        instance->decoder.decode_count_bit = 0;
-                        instance->decoder.parser_step = HollarmDecoderStepReset;
-                        break;
-                    }
-                    if(instance->base.callback)
+                    } else if(instance->base.callback) {
                         instance->base.callback(&instance->base, instance->base.context);
+                    }
                 }
                 instance->decoder.decode_data = 0;
                 instance->decoder.decode_count_bit = 0;
-                instance->decoder.parser_step = HollarmDecoderStepReset;
+                instance->decoder.parser_step = HollarmDecoderStepSaveDuration;
             } else {
                 instance->decoder.parser_step = HollarmDecoderStepReset;
             }

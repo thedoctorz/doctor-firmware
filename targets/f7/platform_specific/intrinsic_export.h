@@ -8,20 +8,16 @@ extern "C" {
 
 void __clear_cache(void*, void*);
 void* __aeabi_uldivmod(uint64_t, uint64_t);
+void* __aeabi_ldivmod(int64_t, int64_t);
 double __aeabi_f2d(float);
 
-/*
- * AEABI / libgcc compiler-runtime helpers exported through the firmware API
- * table. They have no public header of their own, so they are declared here to
- * be collected into api_symbols.csv. Apps that opt out of statically linking
- * libgcc (fap_exclude_libs=["gcc"]) resolve these from the firmware at load
- * time instead of each .fal carrying its own copy of the soft-float routines.
- */
 double __adddf3(double, double);
 void __aeabi_cdcmpeq(double, double);
 void __aeabi_cdcmple(double, double);
 void __aeabi_cdrcmple(double, double);
 float __aeabi_d2f(double);
+float __aeabi_l2f(long long);
+float __aeabi_ul2f(unsigned long long);
 int __aeabi_d2iz(double);
 long long __aeabi_d2lz(double);
 unsigned int __aeabi_d2uiz(double);

@@ -35,16 +35,10 @@ class GitVersion:
             or "unknown"
         )
 
-        version = (
-            os.environ.get("DIST_SUFFIX", None)
-            or "unknown"
-        )
+        version = os.environ.get("DIST_SUFFIX", None) or "doctor"
 
-        force_no_dirty = (
-            os.environ.get("FORCE_NO_DIRTY", None)
-            or ""
-        )
-        if (force_no_dirty != ""):
+        force_no_dirty = os.environ.get("FORCE_NO_DIRTY", None) or ""
+        if force_no_dirty != "":
             dirty = False
 
         if "SOURCE_DATE_EPOCH" in os.environ:
@@ -62,25 +56,9 @@ class GitVersion:
             "GIT_BRANCH": branch,
             "VERSION": version,
             "BUILD_DIRTY": dirty and 1 or 0,
-            "GIT_ORIGIN": "https://github.com/DarkFlippers/unleashed-firmware.git",
+            "GIT_ORIGIN": "https://github.com/thedoctorz/doctor-firmware.git",
             "GIT_COMMIT_DATE": commit_date,
         }
-    
-    # "GIT_ORIGIN": ",".join(self._get_git_origins()),
-
-    def _get_git_origins(self):
-        try:
-            remotes = self._exec_git("remote -v")
-        except subprocess.CalledProcessError:
-            return set()
-        origins = set()
-        for line in remotes.split("\n"):
-            if not line:
-                continue
-            _, destination = line.split("\t")
-            url, _ = destination.split(" ")
-            origins.add(url)
-        return origins
 
     def _exec_git(self, args):
         cmd = ["git"]

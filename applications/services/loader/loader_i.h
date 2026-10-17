@@ -3,11 +3,11 @@
 #include <toolbox/api_lock.h>
 #include <flipper_application/flipper_application.h>
 #include <flipper_application/plugins/plugin_manager.h>
+#include <gui/modules/menu.h>
 
 #include <gui/gui.h>
 #include <gui/view_holder.h>
 #include <gui/modules/loading.h>
-#include <gui/modules/menu.h>
 
 #include <m-array.h>
 
@@ -47,7 +47,6 @@ struct Loader {
     uint8_t loading_depth;
     FuriTimer* loading_timer;
     uint32_t loading_hold_start;
-    // Sampled when the animation goes up; the app is on screen once the live count passes it
     size_t loading_view_ports_baseline;
     bool loading_held;
 };
@@ -56,6 +55,7 @@ typedef enum {
     LoaderMessageTypeStartByName,
     LoaderMessageTypeAppClosed,
     LoaderMessageTypeShowMenu,
+    LoaderMessageTypeShowSettingsMenu,
     LoaderMessageTypeMenuClosed,
     LoaderMessageTypeApplicationsClosed,
     LoaderMessageTypeLock,
@@ -68,6 +68,7 @@ typedef enum {
     LoaderMessageTypeEnqueueLaunch,
     LoaderMessageTypeClearLaunchQueue,
     LoaderMessageTypeSetMenuStyle,
+    LoaderMessageTypeGetMenuStyle,
     LoaderMessageTypeLoadingCheck,
 } LoaderMessageType;
 
@@ -117,5 +118,6 @@ typedef struct {
     union {
         LoaderMessageLoaderStatusResult* status_value;
         LoaderMessageBoolResult* bool_value;
+        const MenuStyle** menu_style;
     };
 } LoaderMessage;

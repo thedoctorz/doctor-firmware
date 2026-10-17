@@ -4,6 +4,17 @@ App(
     targets=["f7"],
     entry_point="subghz_device_cc1101_ext_ep",
     requires=["subghz"],
+    sources=["cc1101_ext/*.c*"],
     sdk_headers=["cc1101_ext/cc1101_ext_interconnect.h"],
     fap_libs=["hwdrivers"],
+)
+
+App(
+    appid="radio_device_si4463_ext",
+    apptype=FlipperAppType.PLUGIN,
+    targets=["f7"],
+    entry_point="subghz_device_si4463_ext_ep",
+    requires=["subghz"],
+    sources=["si4463_ext/*.c*"],
+    sdk_headers=["si4463_ext/si4463_ext_interconnect.h"],
 )

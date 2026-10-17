@@ -3,10 +3,7 @@ App(
     name="Basic settings apps bundle",
     apptype=FlipperAppType.METAPACKAGE,
     provides=[
-        "passport",
         "system_settings",
-        "clock_settings",
-        "input_settings",
         "about",
     ],
 )

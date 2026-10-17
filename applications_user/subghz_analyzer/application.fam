@@ -1,0 +1,17 @@
+App(
+    appid="subghz_analyzer",
+    name="SubGHz Analyzer",
+    apptype=FlipperAppType.MENUEXTERNAL,
+    entry_point="subghz_analyzer_app",
+    requires=["gui"],
+    sources=["*.c"],
+    stack_size=4 * 1024,
+    order=13,
+    icon="A_Spectrum_14",
+    fap_icon="icon.png",
+    fap_category="Sub-GHz",
+    fap_author="@thedoctorz",
+    fap_weburl="https://github.com/thedoctorz/doctor-firmware",
+    fap_version="3.5",
+    fap_description="Find a signal, see what is around it, decide its modulation, and land on a preset that records it",
+)

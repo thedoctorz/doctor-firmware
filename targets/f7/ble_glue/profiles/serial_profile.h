@@ -43,6 +43,8 @@ void ble_profile_serial_set_rpc_active(FuriHalBleProfileBase* profile, bool acti
  */
 void ble_profile_serial_notify_buffer_is_empty(FuriHalBleProfileBase* profile);
 
+void ble_profile_serial_notify_credits(FuriHalBleProfileBase* profile, uint32_t credits);
+
 /** Set Serial service events callback
  *
  * @param profile       Profile instance

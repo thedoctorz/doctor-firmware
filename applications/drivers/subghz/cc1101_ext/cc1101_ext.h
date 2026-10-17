@@ -143,6 +143,10 @@ float subghz_device_cc1101_ext_get_rssi(void);
  */
 uint8_t subghz_device_cc1101_ext_get_lqi(void);
 
+int8_t subghz_device_cc1101_ext_get_freq_est(void);
+
+uint32_t subghz_device_cc1101_ext_rssi_burst(uint8_t* out, size_t count, uint32_t period_us);
+
 /** Check if frequency is in valid range
  *
  * @param      value  frequency in Hz
@@ -150,6 +154,24 @@ uint8_t subghz_device_cc1101_ext_get_lqi(void);
  * @return     true if frequency is valid, otherwise false
  */
 bool subghz_device_cc1101_ext_is_frequency_valid(uint32_t value);
+
+void subghz_device_cc1101_ext_shadow_invalidate(void);
+
+void subghz_device_cc1101_ext_hop_cache_reset(void);
+
+bool subghz_device_cc1101_ext_hop_begin(void);
+
+bool subghz_device_cc1101_ext_hop_prepare(uint32_t frequency);
+
+bool subghz_device_cc1101_ext_hop_goto(uint32_t frequency, const uint8_t* preset_data);
+
+void subghz_device_cc1101_ext_hop_resume(void);
+
+void subghz_device_cc1101_ext_hop_end(void);
+
+bool subghz_device_cc1101_ext_hop_read_image(uint8_t* out);
+
+bool subghz_device_cc1101_ext_hop_get_shadow(uint8_t* out);
 
 /** Set frequency
  *

@@ -1,8 +1,14 @@
 CompileFlags:
-    Add: 
+    Add:
         - -Wno-unknown-warning-option
         - -Wno-format
-    Remove: 
+        - -isystem
+        - toolchain/current/arm-none-eabi/include
+        - -isystem
+        - toolchain/current/lib/gcc/arm-none-eabi/12.3.1/include
+        - -isystem
+        - toolchain/current/lib/gcc/arm-none-eabi/12.3.1/include-fixed
+    Remove:
         - -mword-relocations
     CompilationDatabase: "./build/latest"
 

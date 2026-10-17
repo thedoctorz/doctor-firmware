@@ -9,47 +9,25 @@
 
 static const char* const tab_default_paths[] = {
     [ArchiveTabFavorites] = "/app:favorites",
-    [ArchiveTabIButton] = EXT_PATH("ibutton"),
-    [ArchiveTabNFC] = EXT_PATH("nfc"),
     [ArchiveTabSubGhz] = EXT_PATH("subghz"),
-    [ArchiveTabSubGhzRemote] = EXT_PATH("subghz_remote"),
-    [ArchiveTabLFRFID] = EXT_PATH("lfrfid"),
-    [ArchiveTabInfrared] = EXT_PATH("infrared"),
-    [ArchiveTabBadUsb] = EXT_PATH("badusb"),
-    [ArchiveTabU2f] = "/app:u2f",
     [ArchiveTabApplications] = EXT_PATH("apps"),
     [ArchiveTabInternal] = STORAGE_INT_PATH_PREFIX,
     [ArchiveTabBrowser] = STORAGE_EXT_PATH_PREFIX,
 };
 
 static const char* const known_ext[] = {
-    [ArchiveFileTypeIButton] = ".ibtn",
-    [ArchiveFileTypeNFC] = ".nfc",
     [ArchiveFileTypeSubGhz] = ".sub",
-    [ArchiveFileTypeSubGhzRemote] = ".txt",
-    [ArchiveFileTypeLFRFID] = ".rfid",
-    [ArchiveFileTypeInfrared] = ".ir",
-    [ArchiveFileTypeBadUsb] = ".txt",
-    [ArchiveFileTypeU2f] = "?",
     [ArchiveFileTypeApplication] = ".fap",
-    [ArchiveFileTypeJS] = ".js",
     [ArchiveFileTypeUpdateManifest] = ".fuf",
     [ArchiveFileTypeFolder] = "?",
     [ArchiveFileTypeUnknown] = "*",
-    [ArchiveFileTypeAppOrJs] = ".fap|.js",
+    [ArchiveFileTypeAppOrJs] = ".fap",
     [ArchiveFileTypeSetting] = "?",
 };
 
 static const ArchiveFileTypeEnum known_type[] = {
     [ArchiveTabFavorites] = ArchiveFileTypeUnknown,
-    [ArchiveTabIButton] = ArchiveFileTypeIButton,
-    [ArchiveTabNFC] = ArchiveFileTypeNFC,
     [ArchiveTabSubGhz] = ArchiveFileTypeSubGhz,
-    [ArchiveTabSubGhzRemote] = ArchiveFileTypeSubGhzRemote,
-    [ArchiveTabLFRFID] = ArchiveFileTypeLFRFID,
-    [ArchiveTabInfrared] = ArchiveFileTypeInfrared,
-    [ArchiveTabBadUsb] = ArchiveFileTypeBadUsb,
-    [ArchiveTabU2f] = ArchiveFileTypeU2f,
     [ArchiveTabApplications] = ArchiveFileTypeAppOrJs,
     [ArchiveTabInternal] = ArchiveFileTypeUnknown,
     [ArchiveTabBrowser] = ArchiveFileTypeUnknown,

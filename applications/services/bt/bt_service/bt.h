@@ -56,6 +56,13 @@ bool bt_profile_restore_default(Bt* bt);
  */
 void bt_disconnect(Bt* bt);
 
+/** Report that an app is holding a GAP central link
+ *
+ * @param bt        Bt instance
+ * @param active    true while a central link is up, false once torn down
+ */
+void bt_set_central_active(Bt* bt, bool active);
+
 /** Set callback for Bluetooth status change notification
  *
  * @param bt        Bt instance

@@ -1,6 +1,5 @@
 #include "../subghz_i.h"
 #include "subghz_scene_start.h"
-#include <dolphin/dolphin.h>
 
 #include <lib/subghz/protocols/raw.h>
 
@@ -11,22 +10,20 @@ void subghz_scene_start_submenu_callback(void* context, uint32_t index) {
 
 void subghz_scene_start_on_enter(void* context) {
     SubGhz* subghz = context;
-
-    // Every exit from the Add Manually flow that runs a scene handler arrives here eventually -
-    // after a save by way of the saved list - with none of its scenes left on the stack, which
-    // makes this the one place it is safe to unmap. App teardown covers a kill, which runs none.
-    subghz_add_manually_plugin_unload(subghz);
-
+    subghz_scene_plugin_release(subghz, &subghz->add_manually_plugin);
+    subghz_scene_plugin_release(subghz, &subghz->clean_dupes_plugin);
     if(subghz->state_notifications == SubGhzNotificationStateStarting) {
         subghz->state_notifications = SubGhzNotificationStateIDLE;
     }
 
-    //radio is always stopped here and nothing is being received, so this is the one
-    //place that can afford to go looking for a module plugged back in
-    subghz_txrx_radio_device_poll_reacquire(subghz->txrx);
-
     submenu_add_item(
         subghz->submenu, "Read", SubmenuIndexRead, subghz_scene_start_submenu_callback, subghz);
+    submenu_add_item(
+        subghz->submenu,
+        "Read (Int+Ext)",
+        SubmenuIndexReadDual,
+        subghz_scene_start_submenu_callback,
+        subghz);
     submenu_add_item(
         subghz->submenu,
         "Read RAW",
@@ -49,14 +46,20 @@ void subghz_scene_start_on_enter(void* context) {
         subghz);
     submenu_add_item(
         subghz->submenu,
-        "Frequency Analyzer",
-        SubmenuIndexFrequencyAnalyzer,
+        "Radio Settings",
+        SubmenuIndexExtSettings,
         subghz_scene_start_submenu_callback,
         subghz);
     submenu_add_item(
         subghz->submenu,
-        "Radio Settings",
-        SubmenuIndexExtSettings,
+        "Clean Duplicates",
+        SubmenuIndexCleanDupes,
+        subghz_scene_start_submenu_callback,
+        subghz);
+    submenu_add_item(
+        subghz->submenu,
+        "SubGHz Settings",
+        SubmenuIndexSettingsUser,
         subghz_scene_start_submenu_callback,
         subghz);
     submenu_set_selected_item(
@@ -85,9 +88,21 @@ bool subghz_scene_start_on_event(void* context, SceneManagerEvent event) {
                 subghz->scene_manager, SubGhzSceneStart, SubmenuIndexRead);
             scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReceiver);
             return true;
+        } else if(event.event == SubmenuIndexReadDual) {
+            scene_manager_set_scene_state(
+                subghz->scene_manager, SubGhzSceneStart, SubmenuIndexReadDual);
+            if(!subghz_txrx_dual_is_ext_connected(subghz->txrx)) {
+                notification_message(subghz->notifications, &sequence_error);
+                subghz_dialog_message_no_ext_module(subghz);
+                return true;
+            }
+            subghz_rx_key_state_set(subghz, SubGhzRxKeyStateIDLE);
+            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReceiverDual);
+            return true;
         } else if(event.event == SubmenuIndexSaved) {
             scene_manager_set_scene_state(
                 subghz->scene_manager, SubGhzSceneStart, SubmenuIndexSaved);
+            subghz_file_name_clear(subghz);
             scene_manager_next_scene(subghz->scene_manager, SubGhzSceneSaved);
             return true;
         } else if(event.event == SubmenuIndexAddManually) {
@@ -100,16 +115,20 @@ bool subghz_scene_start_on_event(void* context, SceneManagerEvent event) {
                 subghz->scene_manager, SubGhzSceneStart, SubmenuIndexAddManuallyAdvanced);
             scene_manager_next_scene(subghz->scene_manager, SubGhzSceneSetType);
             return true;
-        } else if(event.event == SubmenuIndexFrequencyAnalyzer) {
-            scene_manager_set_scene_state(
-                subghz->scene_manager, SubGhzSceneStart, SubmenuIndexFrequencyAnalyzer);
-            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneFrequencyAnalyzer);
-            dolphin_deed(DolphinDeedSubGhzFrequencyAnalyzer);
-            return true;
         } else if(event.event == SubmenuIndexExtSettings) {
             scene_manager_set_scene_state(
                 subghz->scene_manager, SubGhzSceneStart, SubmenuIndexExtSettings);
             scene_manager_next_scene(subghz->scene_manager, SubGhzSceneExtModuleSettings);
+            return true;
+        } else if(event.event == SubmenuIndexCleanDupes) {
+            scene_manager_set_scene_state(
+                subghz->scene_manager, SubGhzSceneStart, SubmenuIndexCleanDupes);
+            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneCleanDupes);
+            return true;
+        } else if(event.event == SubmenuIndexSettingsUser) {
+            scene_manager_set_scene_state(
+                subghz->scene_manager, SubGhzSceneStart, SubmenuIndexSettingsUser);
+            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneSettingsUser);
             return true;
         }
     }

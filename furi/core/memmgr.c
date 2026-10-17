@@ -8,6 +8,7 @@ extern void vPortFree(void* pv);
 extern size_t xPortGetFreeHeapSize(void);
 extern size_t xPortGetTotalHeapSize(void);
 extern size_t xPortGetMinimumEverFreeHeapSize(void);
+extern size_t memmgr_heap_get_block_size(void* ptr);
 
 void* malloc(size_t size) {
     return pvPortMalloc(size);
@@ -23,12 +24,17 @@ void* realloc(void* ptr, size_t size) {
         return NULL;
     }
 
-    void* p = pvPortMalloc(size);
-    if(ptr != NULL) {
-        memcpy(p, ptr, size);
-        vPortFree(ptr);
+    if(ptr == NULL) {
+        return pvPortMalloc(size);
     }
 
+    size_t old_size = memmgr_heap_get_block_size(ptr);
+    void* p = pvPortMalloc(size);
+    if(p == NULL) {
+        return NULL;
+    }
+    memcpy(p, ptr, old_size < size ? old_size : size);
+    vPortFree(ptr);
     return p;
 }
 

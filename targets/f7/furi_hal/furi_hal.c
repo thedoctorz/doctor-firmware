@@ -1,6 +1,7 @@
 #include <furi_hal.h>
 #include <furi_hal_mpu.h>
 #include <furi_hal_memory.h>
+#include <furi_hal_nfc.h>
 
 #include <stm32wbxx_ll_cortex.h>
 
@@ -42,7 +43,6 @@ void furi_hal_init(void) {
     furi_hal_resources_init();
     furi_hal_spi_config_init();
     furi_hal_spi_dma_init();
-    furi_hal_ibutton_init();
     furi_hal_speaker_init();
     furi_hal_crypto_init();
     furi_hal_i2c_init();
@@ -56,7 +56,6 @@ void furi_hal_init(void) {
     furi_hal_vibro_init();
     furi_hal_subghz_init();
     furi_hal_nfc_init();
-    furi_hal_rfid_init();
 #endif
 }
 

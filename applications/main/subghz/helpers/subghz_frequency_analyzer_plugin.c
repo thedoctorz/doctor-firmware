@@ -20,7 +20,6 @@ void subghz_frequency_analyzer_plugin_load(SubGhz* subghz) {
 
 void subghz_frequency_analyzer_plugin_unload(SubGhz* subghz) {
     if(subghz->freq_analyzer_plugin) {
-        // Joins the analyzer's worker thread, which runs plugin code, before we unmap it.
         subghz->freq_analyzer_plugin->on_exit(subghz);
         subghz->freq_analyzer_plugin = NULL;
     }
