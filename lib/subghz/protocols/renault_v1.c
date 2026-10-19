@@ -1184,15 +1184,10 @@ static bool hitag2_accept_frame(SubGhzProtocolDecoderHitag2* instance, uint64_t 
         if(instance->identical_count < 0xFFU) {
             instance->identical_count++;
         }
-        if(instance->identical_count >= HITAG2_KANGOO_LONG_FRAMES) {
-            instance->tx_variant = HITAG2_VARIANT_KANGOO;
-            hitag2_decoder_notify(instance);
-        }
+        instance->tx_variant = (instance->identical_count >= HITAG2_KANGOO_LONG_FRAMES) ?
+                                   HITAG2_VARIANT_KANGOO :
+                                   HITAG2_VARIANT_OLD;
         return false;
-    }
-
-    if(instance->pending_notify) {
-        hitag2_decoder_notify(instance);
     }
 
     instance->generic.data_2 = key_2;
@@ -1215,6 +1210,14 @@ static bool hitag2_accept_frame(SubGhzProtocolDecoderHitag2* instance, uint64_t 
     instance->identical_count = 1;
     instance->tx_variant = HITAG2_DEFAULT_VARIANT;
     instance->pending_notify = true;
+    FURI_LOG_D(
+        TAG,
+        "Decode Sn:%08lX Btn:%X Cnt:%03X Hop:%08lX",
+        (unsigned long)instance->generic.serial,
+        instance->generic.btn,
+        instance->generic.cnt & 0x3FFU,
+        (unsigned long)instance->hop);
+    hitag2_decoder_notify(instance);
     return true;
 }
 
@@ -1225,19 +1228,6 @@ void subghz_protocol_decoder_hitag2_feed(void* context, bool level, uint32_t dur
     while(true) {
         switch(instance->decoder.parser_step) {
         case Hitag2DecoderStepReset:
-            if((!level) && instance->pending_notify) {
-                if((duration >= HITAG2_OLD_GAP_MIN_US) && (duration <= HITAG2_OLD_GAP_MAX_US)) {
-                    instance->tx_variant = HITAG2_VARIANT_OLD;
-                    hitag2_decoder_notify(instance);
-                } else if(
-                    (duration >= HITAG2_SHORT_GAP_DETECT_US) &&
-                    (duration <= HITAG2_SHORT_GAP_DETECT_MAX_US) &&
-                    (instance->decoder.decode_count_bit >= HITAG2_HEADER_BITS) &&
-                    (instance->decoder.decode_count_bit < HITAG2_LONG_FRAME_BITS)) {
-                    instance->tx_variant = HITAG2_VARIANT_KANGOO;
-                    hitag2_decoder_notify(instance);
-                }
-            }
             if((!level) && hitag2_duration_is_header_low(duration)) {
                 instance->decoder.te_last = duration;
                 instance->decoder.parser_step = Hitag2DecoderStepCheckSync;
