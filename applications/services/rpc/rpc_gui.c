@@ -75,6 +75,9 @@ typedef struct {
 
     bool virtual_display_not_empty;
     bool is_streaming;
+    // InputFocus is a Main message older schemas (qFlipper, the official apps) cannot decode, and
+    // qFlipper stalls its whole session on the first message it cannot decode. Opt-in only.
+    volatile bool report_focus;
 
     uint32_t input_key_counter[InputKeyMAX];
     uint32_t input_counter;
@@ -174,7 +177,10 @@ static void rpc_system_gui_start_screen_stream_process(const PB_Main* request, v
         // GUI framebuffer callback
         gui_add_framebuffer_callback(
             rpc_gui->gui, rpc_system_gui_screen_stream_frame_callback, context);
-        rpc_system_gui_emit_focus(rpc_gui, remote_keyboard_kind());
+        rpc_gui->report_focus = request->content.gui_start_screen_stream_request.input_focus;
+        if(rpc_gui->report_focus) {
+            rpc_system_gui_emit_focus(rpc_gui, remote_keyboard_kind());
+        }
     }
 }
 
@@ -189,6 +195,7 @@ static void rpc_system_gui_stop_screen_stream_process(const PB_Main* request, vo
     furi_assert(session);
 
     if(rpc_gui->is_streaming) {
+        rpc_gui->report_focus = false;
         rpc_gui->is_streaming = false;
         // Remove GUI framebuffer callback
         gui_remove_framebuffer_callback(
@@ -264,7 +271,9 @@ static void rpc_system_gui_emit_focus(RpcGuiSystem* rpc_gui, RemoteKeyboardKind 
 }
 
 static void rpc_system_gui_focus_callback(RemoteKeyboardKind kind, void* context) {
-    rpc_system_gui_emit_focus(context, kind);
+    RpcGuiSystem* rpc_gui = context;
+    if(!rpc_gui->report_focus) return;
+    rpc_system_gui_emit_focus(rpc_gui, kind);
 }
 
 static void rpc_system_gui_send_text_request_process(const PB_Main* request, void* context) {
@@ -539,6 +548,7 @@ void rpc_system_gui_free(void* context) {
     }
 
     if(rpc_gui->is_streaming) {
+        rpc_gui->report_focus = false;
         rpc_gui->is_streaming = false;
         // Remove GUI framebuffer callback
         gui_remove_framebuffer_callback(

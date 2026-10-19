@@ -28,6 +28,7 @@ static struct {
     ByteInput* byte;
     NumberInput* number;
     uint32_t busy;
+    uint32_t publishing; // Focus callbacks running outside the lock
     RemoteKeyboardSlot slots[REMOTE_KEYBOARD_SLOTS];
 } remote_keyboard;
 
@@ -68,11 +69,16 @@ static void remote_keyboard_publish(RemoteKeyboardKind kind) {
         contexts[count] = remote_keyboard.slots[i].context;
         count++;
     }
+    remote_keyboard.publishing++;
     remote_keyboard_unlock();
 
     for(size_t i = 0; i < count; i++) {
         callbacks[i](kind, contexts[i]);
     }
+
+    remote_keyboard_lock();
+    remote_keyboard.publishing--;
+    remote_keyboard_unlock();
 }
 
 static void remote_keyboard_wait_idle_locked(void) {
@@ -111,6 +117,13 @@ void remote_keyboard_remove_focus_callback(RemoteKeyboardFocusCallback callback,
         remote_keyboard.slots[i].callback = NULL;
         remote_keyboard.slots[i].context = NULL;
         break;
+    }
+    // A publish may have copied this callback before it was removed; the caller frees the
+    // context as soon as this returns, so wait the copy out
+    while(remote_keyboard.publishing > 0) {
+        remote_keyboard_unlock();
+        furi_delay_tick(1);
+        remote_keyboard_lock();
     }
     remote_keyboard_unlock();
 }
