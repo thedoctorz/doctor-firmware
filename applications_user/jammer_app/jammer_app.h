@@ -27,6 +27,7 @@ typedef struct {
     JammerModulation modulation;
     bool jamming;
     bool ext_radio;
+    bool radio_open;
 
     float rssi;
 } JammerApp;

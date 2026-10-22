@@ -193,35 +193,39 @@ static void subghz_rx_session_swap_preset_locked(SubGhzRxSession* instance) {
     subghz_rx_session_use_preset_locked(instance, instance->preset_index);
 }
 
-static bool subghz_rx_session_preset_is_ask(const uint8_t* preset_data) {
-    if(preset_data == NULL) return false;
-
-    for(size_t i = 0; preset_data[i]; i += 2) {
-        if(preset_data[i] == CC1101_MDMCFG2) {
-            return ((preset_data[i + 1] >> 4) & 0x07) == 3;
+static SubGhzProtocolFlag subghz_rx_session_modulation_mask(const uint8_t* preset_data) {
+    if(preset_data) {
+        for(size_t i = 0; preset_data[i]; i += 2) {
+            if(preset_data[i] == CC1101_MDMCFG2) {
+                switch((preset_data[i + 1] >> 4) & 0x07) {
+                case 3: // ASK/OOK
+                    return SubGhzProtocolFlag_AM;
+                case 0: // 2-FSK
+                case 1: // GFSK
+                case 4: // 4-FSK
+                case 7: // MSK
+                    return SubGhzProtocolFlag_FM;
+                default:
+                    break;
+                }
+                break;
+            }
         }
     }
-    return false;
+    // Unknown modulation must not exclude a decoder.
+    return SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM;
 }
 
 static SubGhzProtocolFlag subghz_rx_session_band_flag(uint32_t frequency) {
-    const SubGhzProtocolFlag all = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 |
-                                   SubGhzProtocolFlag_868;
-
     if(frequency >= 280000000UL && frequency <= 350000000UL) return SubGhzProtocolFlag_315;
     if(frequency >= 380000000UL && frequency <= 480000000UL) return SubGhzProtocolFlag_433;
     if(frequency >= 750000000UL && frequency <= 950000000UL) return SubGhzProtocolFlag_868;
-    return all;
+    return SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_868;
 }
 
 static SubGhzProtocolFlag
     subghz_rx_session_gate_mask(uint32_t frequency, const uint8_t* preset_data) {
-    SubGhzProtocolFlag mod = SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM;
-    if(preset_data) {
-        mod = subghz_rx_session_preset_is_ask(preset_data) ? SubGhzProtocolFlag_AM :
-                                                             SubGhzProtocolFlag_FM;
-    }
-    return mod | subghz_rx_session_band_flag(frequency);
+    return subghz_rx_session_modulation_mask(preset_data) | subghz_rx_session_band_flag(frequency);
 }
 
 static void subghz_rx_session_speaker_set(SubGhzRxSession* instance, bool on) {

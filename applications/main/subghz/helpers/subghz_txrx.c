@@ -124,34 +124,42 @@ static bool subghz_txrx_hopper_activity_seen(SubGhzTxRx* instance) {
     return instance->hopper_act_match >= SUBGHZ_HOPPER_ACT_MATCH_MIN;
 }
 
-static bool subghz_txrx_preset_is_ask(const uint8_t* preset_data) {
-    if(preset_data == NULL) return false;
-
-    for(size_t i = 0; preset_data[i]; i += 2) {
-        if(preset_data[i] == CC1101_MDMCFG2) {
-            return ((preset_data[i + 1] >> 4) & 0x07) == 3;
+static SubGhzProtocolFlag subghz_txrx_modulation_mask(const uint8_t* preset_data) {
+    if(preset_data) {
+        for(size_t i = 0; preset_data[i]; i += 2) {
+            if(preset_data[i] == CC1101_MDMCFG2) {
+                switch((preset_data[i + 1] >> 4) & 0x07) {
+                case 3: // ASK/OOK
+                    return SubGhzProtocolFlag_AM;
+                case 0: // 2-FSK
+                case 1: // GFSK
+                case 4: // 4-FSK
+                case 7: // MSK
+                    return SubGhzProtocolFlag_FM;
+                default:
+                    break;
+                }
+                break;
+            }
         }
     }
-    return false;
+    // Unknown modulation must not exclude a decoder.
+    return SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM;
 }
 
 static SubGhzProtocolFlag subghz_txrx_band_flag(uint32_t frequency) {
-    const SubGhzProtocolFlag all = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 |
-                                   SubGhzProtocolFlag_868;
-
     if(frequency >= 280000000UL && frequency <= 350000000UL) return SubGhzProtocolFlag_315;
     if(frequency >= 380000000UL && frequency <= 480000000UL) return SubGhzProtocolFlag_433;
     if(frequency >= 750000000UL && frequency <= 950000000UL) return SubGhzProtocolFlag_868;
-    return all;
+    return SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_868;
 }
 
 static SubGhzProtocolFlag subghz_txrx_gate_mask(uint32_t frequency, const uint8_t* preset_data) {
-    SubGhzProtocolFlag mod = SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM;
-    if(preset_data) {
-        mod = subghz_txrx_preset_is_ask(preset_data) ? SubGhzProtocolFlag_AM :
-                                                       SubGhzProtocolFlag_FM;
-    }
-    return mod | subghz_txrx_band_flag(frequency);
+    return subghz_txrx_modulation_mask(preset_data) | subghz_txrx_band_flag(frequency);
+}
+
+static bool subghz_txrx_preset_is_ask(const uint8_t* preset_data) {
+    return subghz_txrx_modulation_mask(preset_data) == SubGhzProtocolFlag_AM;
 }
 
 static void subghz_txrx_barrier_callback(void* context, uint32_t payload) {
@@ -441,6 +449,7 @@ const char* subghz_txrx_get_preset_name(SubGhzTxRx* instance, const char* preset
     // Accept short names already stored in some .sub files
     if(!strcmp(preset, "AM270") || !strcmp(preset, "AM650") || !strcmp(preset, "AM101") ||
        !strcmp(preset, "FM238") || !strcmp(preset, "FM12K") || !strcmp(preset, "FM20K") ||
+       !strcmp(preset, "FM20KR") ||
        !strcmp(preset, "FM14K") || !strcmp(preset, "FM476") || !strcmp(preset, "CUSTOM")) {
         preset_name = preset;
     } else if(!strcmp(preset, "FuriHalSubGhzPresetOok270Async")) {

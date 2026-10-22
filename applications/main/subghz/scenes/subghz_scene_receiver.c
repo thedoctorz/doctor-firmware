@@ -191,7 +191,18 @@ static void subghz_scene_receiver_cycle_preset(SubGhz* subghz, bool next) {
             break;
         }
     }
-    index = next ? (index + 1) % count : (index + count - 1) % count;
+
+    size_t chosen = index;
+    bool found = false;
+    for(size_t step = 1; step < count; step++) {
+        const size_t candidate = next ? (index + step) % count : (index + count - step) % count;
+        if(!subghz_txrx_preset_fits_radio(subghz->txrx, candidate)) continue;
+        chosen = candidate;
+        found = true;
+        break;
+    }
+    if(!found) return;
+    index = chosen;
 
     const char* preset_name = subghz_setting_get_preset_name(setting, index);
     uint8_t* preset_data = subghz_setting_get_preset_data(setting, index);

@@ -100,8 +100,9 @@ const SubGhzProtocolEncoder subghz_protocol_allstar_firefly_encoder = {
 const SubGhzProtocol subghz_protocol_allstar_firefly = {
     .name = SUBGHZ_PROTOCOL_ALLSTAR_FIREFLY_NAME,
     .type = SubGhzProtocolTypeStatic,
-    .flag = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_AM | SubGhzProtocolFlag_Decodable |
-            SubGhzProtocolFlag_Load | SubGhzProtocolFlag_Save | SubGhzProtocolFlag_Send,
+    .flag = SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_AM |
+            SubGhzProtocolFlag_Decodable | SubGhzProtocolFlag_Load | SubGhzProtocolFlag_Save |
+            SubGhzProtocolFlag_Send,
 
     .decoder = &subghz_protocol_allstar_firefly_decoder,
     .encoder = &subghz_protocol_allstar_firefly_encoder,

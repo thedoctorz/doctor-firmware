@@ -4,6 +4,9 @@
 
 #define TAG "SubGhzWorker"
 
+#define SUBGHZ_WORKER_BATCH_SAMPLES 32
+#define SUBGHZ_WORKER_RUN_TICKS     10
+
 struct SubGhzWorker {
     FuriThread* thread;
     FuriStreamBuffer* stream;
@@ -84,12 +87,13 @@ static bool subghz_worker_retune_pending(SubGhzWorker* instance) {
 static int32_t subghz_worker_thread_callback(void* context) {
     SubGhzWorker* instance = context;
 
-    LevelDuration level_duration;
+    LevelDuration batch[SUBGHZ_WORKER_BATCH_SAMPLES];
+    uint32_t run_start = furi_get_tick();
     while(instance->running) {
         subghz_worker_retune_pending(instance);
-        int ret = furi_stream_buffer_receive(
-            instance->stream, &level_duration, sizeof(LevelDuration), 10);
-        if(ret == sizeof(LevelDuration)) {
+        size_t ret = furi_stream_buffer_receive(instance->stream, batch, sizeof(batch), 10);
+        for(size_t i = 0; i < ret / sizeof(LevelDuration) && instance->running; i++) {
+            const LevelDuration level_duration = batch[i];
             const bool stale = subghz_worker_retune_pending(instance);
             instance->read_seq++;
             if(stale) continue;
@@ -129,6 +133,12 @@ static int32_t subghz_worker_thread_callback(void* context) {
                     instance->filter_level_duration.level = level;
                 }
             }
+        }
+        
+        const uint32_t now = furi_get_tick();
+        if(now - run_start >= SUBGHZ_WORKER_RUN_TICKS) {
+            furi_delay_tick(1);
+            run_start = furi_get_tick();
         }
     }
 

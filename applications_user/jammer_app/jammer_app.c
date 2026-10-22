@@ -52,6 +52,28 @@ static const char* jammer_mod_name(JammerModulation mod) {
     return (mod == JammerModAm) ? "AM" : "FM";
 }
 
+static void jammer_yield_radio(JammerApp* app) {
+    if(!app->ext_radio || !app->radio_open) return;
+    subghz_devices_idle(app->device);
+    subghz_devices_sleep(app->device);
+    subghz_devices_end(app->device);
+    app->radio_open = false;
+}
+
+static bool jammer_claim_radio(JammerApp* app) {
+    if(!app->ext_radio || app->radio_open) return true;
+    if(!subghz_devices_begin(app->device)) {
+        FURI_LOG_E(TAG, "External radio begin failed");
+        subghz_devices_end(app->device);
+        return false;
+    }
+    subghz_devices_reset(app->device);
+    subghz_devices_idle(app->device);
+    subghz_devices_load_preset(app->device, jammer_preset(app->modulation), NULL);
+    app->radio_open = true;
+    return true;
+}
+
 static int32_t jammer_tx_thread(void* context) {
     JammerApp* app = context;
     uint8_t data[JAMMER_DATA_LEN];
@@ -80,22 +102,26 @@ static void jammer_stop(JammerApp* app) {
         furi_thread_free(app->tx_thread);
         app->tx_thread = NULL;
     }
-    if(subghz_tx_rx_worker_is_running(app->subghz_txrx)) {
+    if(app->subghz_txrx && subghz_tx_rx_worker_is_running(app->subghz_txrx)) {
         subghz_tx_rx_worker_stop(app->subghz_txrx);
     }
-    subghz_devices_idle(app->device);
     app->jamming = false;
+
+    if(app->ext_radio && !jammer_claim_radio(app)) return;
+    if(app->device) subghz_devices_idle(app->device);
 }
 
 static void jammer_start(JammerApp* app) {
     if(app->jamming || !app->device) return;
 
-    subghz_devices_idle(app->device);
-    subghz_devices_load_preset(app->device, jammer_preset(app->modulation), NULL);
+    jammer_yield_radio(app);
 
     if(!subghz_tx_rx_worker_start(app->subghz_txrx, app->device, app->frequency)) {
         FURI_LOG_E(TAG, "TX worker failed to start");
-        subghz_tx_rx_worker_stop(app->subghz_txrx);
+        if(subghz_tx_rx_worker_is_running(app->subghz_txrx)) {
+            subghz_tx_rx_worker_stop(app->subghz_txrx);
+        }
+        jammer_claim_radio(app);
         return;
     }
 
@@ -111,6 +137,7 @@ static void jammer_start(JammerApp* app) {
 
 static void jammer_poll_rssi(JammerApp* app) {
     if(app->jamming || !app->device) return;
+    if(app->ext_radio && !app->radio_open) return;
     subghz_devices_idle(app->device);
     subghz_devices_set_frequency(app->device, app->frequency);
     subghz_devices_flush_rx(app->device);
@@ -278,10 +305,11 @@ JammerApp* jammer_app_alloc(void) {
 
     subghz_devices_init();
     app->device = radio_device_loader_set(NULL, SubGhzRadioDeviceTypeExternalCC1101);
-    app->ext_radio = (app->device != NULL);
     if(!app->device) {
         app->device = radio_device_loader_set(NULL, SubGhzRadioDeviceTypeInternal);
     }
+    app->ext_radio = radio_device_loader_is_external(app->device);
+    app->radio_open = app->ext_radio;
     if(app->device) {
         subghz_devices_reset(app->device);
         subghz_devices_idle(app->device);
@@ -304,8 +332,12 @@ void jammer_app_free(JammerApp* app) {
         subghz_tx_rx_worker_free(app->subghz_txrx);
     }
     if(app->device) {
-        subghz_devices_sleep(app->device);
-        radio_device_loader_end(app->device);
+        if(app->ext_radio && !app->radio_open) jammer_claim_radio(app);
+        if(!app->ext_radio || app->radio_open) {
+            subghz_devices_sleep(app->device);
+            radio_device_loader_end(app->device);
+            app->radio_open = false;
+        }
     }
     subghz_devices_deinit();
 

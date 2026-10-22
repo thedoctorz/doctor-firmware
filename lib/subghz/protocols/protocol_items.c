@@ -92,7 +92,9 @@ const SubGhzProtocol* const subghz_protocol_registry_items[] = {
     &subghz_protocol_vag,
     &subghz_protocol_urmet,
     &subghz_protocol_bmw,
-    &subghz_protocol_mercedes,
+    &subghz_protocol_mercedes_v1,
+    &subghz_protocol_mercedes_v0,
+    &subghz_protocol_toyota,
 };
 
 const SubGhzProtocolRegistry subghz_protocol_registry = {

@@ -23,7 +23,9 @@ What The Doctor's Firmware adds on top of Unleashed.
 - **Kia V0, V3/V4, V5, V6, V7** — 315/433 FM, transmit
 - **Kia V1, V2** — 315/433 AM, transmit
 - **Mazda V0, V2** — 315/433 AM/FM, transmit
-- **Mercedes** — 433 FM, transmit
+- **Mercedes V0** — 433 FM, transmit
+- **Mercedes V1** — 433 FM, transmit
+- **Toyota / Lexus** — 433 AM, transmit
 - **Opel V1** — 433 AM
 - **PSA** — 433 AM/FM, transmit. In-app helper when a capture still needs a key
 - **Renault V0, V1** — 315/433 AM/FM, transmit

@@ -186,13 +186,14 @@ static const SubGhzCliPreset subghz_cli_presets[] = {
     {"FM238", subghz_device_cc1101_preset_2fsk_dev2_38khz_async_regs},
     {"FM12K", subghz_device_cc1101_preset_2fsk_dev12khz_async_regs},
     {"FM20K", subghz_device_cc1101_preset_mercedes_async_regs},
+    {"FM20KR", subghz_device_cc1101_preset_mercedes_rx_async_regs},
     {"FM14K", subghz_device_cc1101_preset_2fsk_dev14khz_38kbaud_async_regs},
     {"FM476", subghz_device_cc1101_preset_2fsk_dev47_6khz_async_regs},
     {"F4", subghz_cli_preset_f4_regs},
 };
 
 #define SUBGHZ_CLI_PRESET_NAMES \
-    "AM270|AM650|AM101|FM238|FM12K|FM20K|FM14K|FM476|F4|<setting_user name>"
+    "AM270|AM650|AM101|FM238|FM12K|FM20K|FM20KR|FM14K|FM476|F4|<setting_user name>"
 
 static SubGhzSetting* subghz_cli_setting = NULL;
 static char subghz_cli_custom_name[32];

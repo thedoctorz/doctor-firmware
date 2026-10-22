@@ -92,4 +92,6 @@
 #include "vag.h"
 #include "urmet.h"
 #include "bmw.h"
-#include "mercedes.h"
+#include "mercedes_v1.h"
+#include "mercedes_v0.h"
+#include "toyota.h"

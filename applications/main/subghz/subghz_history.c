@@ -483,7 +483,7 @@ static SubGhzHistoryButtonIcon subghz_history_button_icon_from_fields(FlipperFor
                 btn == 0x0AU || (low_nibble >= 0x08U && low_nibble <= 0x0BU));
         } else if(!strcmp(protocol_name, "Renault V1")) {
             icon = subghz_history_button_icon_from_lock_unlock(btn == 0x01U, btn == 0x02U);
-        } else if(!strcmp(protocol_name, "MERCEDES")) {
+        } else if(!strcmp(protocol_name, "Mercedes V1")) {
             icon = subghz_history_button_icon_from_lock_unlock(btn == 0x00U, btn == 0x01U);
         } else if(!strcmp(protocol_name, "Subaru")) {
             icon = subghz_history_button_icon_from_lock_unlock(

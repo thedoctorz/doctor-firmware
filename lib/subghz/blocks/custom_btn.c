@@ -198,7 +198,11 @@ void subghz_custom_btn_configure_map(const char* protocol_name, uint32_t type, u
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_UP, 0x02, "Lock");
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_OK, 0x01, "Unlock");
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_DOWN, 0x03, "Trunk");
-    } else if(!strcmp(protocol_name, "MERCEDES")) {
+    } else if(!strcmp(protocol_name, "Mercedes V0")) {
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_UP, 0x0C, "Lock");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_OK, 0x08, "Unlock");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_DOWN, 0x0A, "??");
+    } else if(!strcmp(protocol_name, "Mercedes V1")) {
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_UP, 0x00, "Lock");
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_OK, 0x01, "Unlock");
     } else if(strstr(protocol_name, "Subaru")) {
@@ -220,5 +224,13 @@ void subghz_custom_btn_configure_map(const char* protocol_name, uint32_t type, u
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_DOWN, 0x02, "Unlock");
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_LEFT, 0x04, "Trunk");
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_RIGHT, 0x08, "Panic");
+    } else if(!strcmp(protocol_name, "Toyota Lexus")) {
+        const uint8_t command =
+            (custom_btn_original >= 1U && custom_btn_original <= 3U) ? custom_btn_original : 1U;
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_OK, command, "OG");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_UP, 0x01, "BTN1");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_DOWN, 0x02, "BT2");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_LEFT, 0x03, "BT3");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_RIGHT, 0x03, "BT3");
     }
 }
