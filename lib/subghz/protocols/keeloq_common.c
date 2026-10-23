@@ -377,3 +377,121 @@ bool subghz_protocol_keeloq_common_get_telcoma_table(SubGhzKeystore* keystore, u
         }
     return got_hi && got_lo;
 }
+
+static uint8_t pandora_rol1(uint8_t value) {
+    return (uint8_t)((value << 1) | (value >> 7));
+}
+
+static uint8_t pandora_ror1(uint8_t value) {
+    return (uint8_t)((value >> 1) | (value << 7));
+}
+
+static uint8_t pandora_nswap(uint8_t value) {
+    return (uint8_t)((value << 4) | (value >> 4));
+}
+
+static void pandora_swap(uint8_t* left, uint8_t* right) {
+    uint8_t held = *left;
+    *left = *right;
+    *right = held;
+}
+
+static void pandora_hop_bytes(uint32_t hop, uint8_t byte[4]) {
+    byte[0] = (uint8_t)hop;
+    byte[1] = (uint8_t)(hop >> 8);
+    byte[2] = (uint8_t)(hop >> 16);
+    byte[3] = (uint8_t)(hop >> 24);
+}
+
+static uint32_t pandora_hop_word(const uint8_t byte[4]) {
+    return (uint32_t)byte[0] | ((uint32_t)byte[1] << 8) | ((uint32_t)byte[2] << 16) |
+           ((uint32_t)byte[3] << 24);
+}
+
+static void pandora_hop_forward_bytes(uint8_t byte[4], uint8_t variant) {
+    switch(variant) {
+    case 1:
+        byte[0] = (uint8_t)~byte[0];
+        pandora_swap(&byte[1], &byte[2]);
+        byte[0] = pandora_ror1(byte[0]);
+        byte[1] = pandora_nswap(byte[1]);
+        byte[1] = pandora_rol1(byte[1]);
+        byte[1] = pandora_rol1(byte[1]);
+        break;
+    case 2:
+        byte[0] = pandora_rol1(byte[0]);
+        byte[0] = pandora_rol1(byte[0]);
+        pandora_swap(&byte[2], &byte[3]);
+        byte[1] = pandora_nswap(byte[1]);
+        byte[1] = pandora_ror1(byte[1]);
+        break;
+    case 3:
+        byte[0] = pandora_nswap(byte[0]);
+        pandora_swap(&byte[1], &byte[3]);
+        byte[1] = (uint8_t)~byte[1];
+        byte[1] = pandora_rol1(byte[1]);
+        byte[0] = pandora_ror1(byte[0]);
+        byte[0] = pandora_ror1(byte[0]);
+        break;
+    case 4:
+        byte[1] = (uint8_t)~byte[1];
+        pandora_swap(&byte[0], &byte[3]);
+        byte[0] = pandora_rol1(byte[0]);
+        byte[1] = pandora_nswap(byte[1]);
+        byte[1] = pandora_rol1(byte[1]);
+        break;
+    default:
+        break;
+    }
+}
+
+static void pandora_hop_inverse_bytes(uint8_t byte[4], uint8_t variant) {
+    switch(variant) {
+    case 1:
+        byte[1] = pandora_ror1(byte[1]);
+        byte[1] = pandora_ror1(byte[1]);
+        byte[1] = pandora_nswap(byte[1]);
+        byte[0] = pandora_rol1(byte[0]);
+        pandora_swap(&byte[1], &byte[2]);
+        byte[0] = (uint8_t)~byte[0];
+        break;
+    case 2:
+        byte[1] = pandora_rol1(byte[1]);
+        byte[1] = pandora_nswap(byte[1]);
+        pandora_swap(&byte[2], &byte[3]);
+        byte[0] = pandora_ror1(byte[0]);
+        byte[0] = pandora_ror1(byte[0]);
+        break;
+    case 3:
+        byte[0] = pandora_rol1(byte[0]);
+        byte[0] = pandora_rol1(byte[0]);
+        byte[1] = pandora_ror1(byte[1]);
+        byte[1] = (uint8_t)~byte[1];
+        pandora_swap(&byte[1], &byte[3]);
+        byte[0] = pandora_nswap(byte[0]);
+        break;
+    case 4:
+        byte[1] = pandora_ror1(byte[1]);
+        byte[1] = pandora_nswap(byte[1]);
+        byte[0] = pandora_ror1(byte[0]);
+        pandora_swap(&byte[0], &byte[3]);
+        byte[1] = (uint8_t)~byte[1];
+        break;
+    default:
+        break;
+    }
+}
+
+uint32_t subghz_protocol_keeloq_common_pandora_hop_forward(uint32_t hop, uint8_t variant) {
+    uint8_t byte[4];
+    pandora_hop_bytes(hop, byte);
+    pandora_hop_forward_bytes(byte, variant);
+    return pandora_hop_word(byte);
+}
+
+uint32_t subghz_protocol_keeloq_common_pandora_hop_inverse(uint32_t hop, uint8_t variant) {
+    uint8_t byte[4];
+    pandora_hop_bytes(hop, byte);
+    pandora_hop_inverse_bytes(byte, variant);
+    return pandora_hop_word(byte);
+}

@@ -42,6 +42,8 @@ typedef struct SubGhzKeystore SubGhzKeystore;
  * decoder reports, since both halves are found by type rather than by name. */
 #define KEELOQ_LEARNING_TELCOMA_TABLE_HI    18u
 #define KEELOQ_LEARNING_TELCOMA_TABLE_LO    19u
+#define KEELOQ_LEARNING_PANDORA_HOP         20u
+#define KEELOQ_LEARNING_PANDORA_HOP_LAST    23u
 
 /* Round counts used by the "limited round" KeeLoq variants */
 #define KEELOQ_ROUNDS_FULL              528u
@@ -176,3 +178,6 @@ uint32_t subghz_protocol_keeloq_common_encrypt_rounds(
     const uint32_t data,
     const uint64_t key,
     uint32_t rounds);
+
+uint32_t subghz_protocol_keeloq_common_pandora_hop_forward(uint32_t hop, uint8_t variant);
+uint32_t subghz_protocol_keeloq_common_pandora_hop_inverse(uint32_t hop, uint8_t variant);

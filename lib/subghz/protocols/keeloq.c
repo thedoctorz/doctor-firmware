@@ -513,6 +513,14 @@ static bool subghz_protocol_keeloq_gen_data(
                                 fix, manufacture_code->key);
                             hop = subghz_protocol_keeloq_common_encrypt(decrypt, man);
                             break;
+                        case KEELOQ_LEARNING_PANDORA_HOP:
+                        case KEELOQ_LEARNING_PANDORA_HOP + 1:
+                        case KEELOQ_LEARNING_PANDORA_HOP + 2:
+                        case KEELOQ_LEARNING_PANDORA_HOP + 3:
+                            hop = subghz_protocol_keeloq_common_pandora_hop_inverse(
+                                subghz_protocol_keeloq_common_encrypt(decrypt, manufacture_code->key),
+                                (uint8_t)(manufacture_code->type - KEELOQ_LEARNING_PANDORA_HOP + 1));
+                            break;
                         case KEELOQ_LEARNING_TELCOMA_TABLE_HI: {
                             uint32_t telcoma_table[4] = {0};
                             if(subghz_protocol_keeloq_common_get_telcoma_table(
@@ -1322,6 +1330,22 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller_selector(
                         return decrypt;
                     }
                     break;
+                case KEELOQ_LEARNING_PANDORA_HOP:
+                case KEELOQ_LEARNING_PANDORA_HOP + 1:
+                case KEELOQ_LEARNING_PANDORA_HOP + 2:
+                case KEELOQ_LEARNING_PANDORA_HOP + 3: {
+                    uint8_t variant =
+                        (uint8_t)(manufacture_code->type - KEELOQ_LEARNING_PANDORA_HOP + 1);
+                    decrypt = subghz_protocol_keeloq_common_decrypt(
+                        subghz_protocol_keeloq_common_pandora_hop_forward(hop, variant),
+                        manufacture_code->key);
+                    if((((uint16_t)(decrypt >> 16)) & 0xFF) == end_serial) {
+                        instance->cnt = decrypt & 0x0000FFFF;
+                        instance->seed = variant;
+                        KEELOQ_SELECTOR_MATCH(manufacture_code->type, decrypt);
+                    }
+                    break;
+                }
                 case KEELOQ_LEARNING_TELCOMA_TABLE_HI: {
                     uint32_t telcoma_table[4] = {0};
                     if(!subghz_protocol_keeloq_common_get_telcoma_table(keystore, telcoma_table))
