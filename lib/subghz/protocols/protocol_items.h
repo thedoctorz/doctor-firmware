@@ -95,3 +95,4 @@
 #include "mercedes_v1.h"
 #include "mercedes_v0.h"
 #include "toyota.h"
+#include "datsun_lada.h"

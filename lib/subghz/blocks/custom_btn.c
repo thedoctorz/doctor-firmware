@@ -118,7 +118,13 @@ void subghz_custom_btn_configure_map(const char* protocol_name, uint32_t type, u
         return;
     }
 
-    if(!strcmp(protocol_name, "Kia V7")) {
+    if(!strcmp(protocol_name, "Datsun Lada")) {
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_OK, custom_btn_original, "OG");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_UP, 0x40, "BTN0");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_DOWN, 0x20, "BTN3");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_LEFT, 0x60, "BTN5");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_RIGHT, 0x80, "BTN1");
+    } else if(!strcmp(protocol_name, "Kia V7")) {
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_UP, 0x01, "Lock");
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_OK, 0x02, "Unlock");
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_DOWN, 0x03, "Trunk");
