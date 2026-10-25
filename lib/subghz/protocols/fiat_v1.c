@@ -789,10 +789,22 @@ static bool fiat_v1_key_is_builtin(const uint8_t key[6]) {
     return false;
 }
 
+static void fiat_v1_hitag2_key_disk_to_cipher(const uint8_t disk[6], uint8_t cipher[6]) {
+    const uint8_t tmp[6] = {disk[2], disk[3], disk[4], disk[5], disk[0], disk[1]};
+    memcpy(cipher, tmp, sizeof(tmp));
+}
+
+static void fiat_v1_hitag2_key_cipher_to_disk(const uint8_t cipher[6], uint8_t disk[6]) {
+    const uint8_t tmp[6] = {cipher[4], cipher[5], cipher[0], cipher[1], cipher[2], cipher[3]};
+    memcpy(disk, tmp, sizeof(tmp));
+}
+
 static void fiat_v1_store_hitag2_key(FlipperFormat* ff, const uint8_t key[6], uint32_t epoch) {
     if(!ff || !key) return;
+    uint8_t disk_key[6];
+    fiat_v1_hitag2_key_cipher_to_disk(key, disk_key);
     flipper_format_rewind(ff);
-    flipper_format_insert_or_update_hex(ff, FIAT_V1_HITAG2_KEY_FIELD, key, 6U);
+    flipper_format_insert_or_update_hex(ff, FIAT_V1_HITAG2_KEY_FIELD, disk_key, 6U);
     fiat_v1_flipper_update_or_insert_u32(ff, FIAT_V1_HITAG2_EPOCH_FIELD, epoch & 0x3FFFFUL);
 }
 
@@ -810,7 +822,9 @@ static bool fiat_v1_resolve_hitag2_key(
     uint32_t epoch = 0U;
     if(ff) {
         flipper_format_rewind(ff);
-        if(flipper_format_read_hex(ff, FIAT_V1_HITAG2_KEY_FIELD, key, sizeof(key))) {
+        uint8_t disk_key[6] = {0};
+        if(flipper_format_read_hex(ff, FIAT_V1_HITAG2_KEY_FIELD, disk_key, sizeof(disk_key))) {
+            fiat_v1_hitag2_key_disk_to_cipher(disk_key, key);
             flipper_format_rewind(ff);
             if(flipper_format_read_uint32(ff, FIAT_V1_HITAG2_EPOCH_FIELD, &epoch, 1U)) {
                 epoch &= 0x3FFFFUL;
@@ -1147,8 +1161,10 @@ SubGhzProtocolStatus
     fiat_v1_flipper_update_or_insert_u32(flipper_format, FIAT_V1_TAIL_BITS_FIELD, tail_w);
     flipper_format_insert_or_update_hex(
         flipper_format, FIAT_V1_RAW_FIELD, instance->raw_data, FIAT_V1_WIRE_BYTES);
+    uint8_t hitag2_disk_key[6];
+    fiat_v1_hitag2_key_cipher_to_disk(instance->hitag2_key, hitag2_disk_key);
     flipper_format_insert_or_update_hex(
-        flipper_format, FIAT_V1_HITAG2_KEY_FIELD, instance->hitag2_key, 6U);
+        flipper_format, FIAT_V1_HITAG2_KEY_FIELD, hitag2_disk_key, 6U);
     fiat_v1_flipper_update_or_insert_u32(flipper_format, FIAT_V1_HITAG2_EPOCH_FIELD, epoch_w);
     (void)fiat_v1_write_display(
         flipper_format, instance->base.protocol->name, fiat_v1_button_name(btn));
@@ -1331,8 +1347,10 @@ SubGhzProtocolStatus subghz_protocol_decoder_fiat_v1_serialize(
 
     if(instance->hitag2_key_valid) {
         uint32_t epoch = instance->hitag2_epoch & 0x3FFFFUL;
+        uint8_t hitag2_disk_key[6];
+        fiat_v1_hitag2_key_cipher_to_disk(instance->hitag2_key, hitag2_disk_key);
         if(!flipper_format_insert_or_update_hex(
-               flipper_format, FIAT_V1_HITAG2_KEY_FIELD, instance->hitag2_key, 6U)) {
+               flipper_format, FIAT_V1_HITAG2_KEY_FIELD, hitag2_disk_key, 6U)) {
             return SubGhzProtocolStatusErrorParserOthers;
         }
         fiat_v1_flipper_update_or_insert_u32(flipper_format, FIAT_V1_HITAG2_EPOCH_FIELD, epoch);
@@ -1507,20 +1525,25 @@ bool fiat_v1_flipper_accept_hitag2_key(FlipperFormat* flipper_format, const uint
     if(!fiat_v1_parse_frame_from_flipper(flipper_format, &uid, &button, &control, &hop)) {
         return false;
     }
-    if(!fiat_v1_key_matches(uid, button, control, hop, key, 0U) &&
-       !fiat_v1_key_matches_any_button(uid, control, hop, key, 0U)) {
+    uint8_t cipher_key[6];
+    fiat_v1_hitag2_key_disk_to_cipher(key, cipher_key);
+    if(!fiat_v1_key_matches(uid, button, control, hop, cipher_key, 0U) &&
+       !fiat_v1_key_matches_any_button(uid, control, hop, cipher_key, 0U)) {
         return false;
     }
 
-    fiat_v1_store_hitag2_key(flipper_format, key, 0U);
-    hitag2_key_db_save_key(uid, key, 0U);
+    fiat_v1_store_hitag2_key(flipper_format, cipher_key, 0U);
+    hitag2_key_db_save_key(uid, cipher_key, 0U);
     return true;
 }
 
 bool fiat_v1_flipper_write_hitag2_key(FlipperFormat* flipper_format, const uint8_t key[6]) {
     if(!flipper_format || !key) return false;
+    uint8_t disk_key[6];
+    fiat_v1_hitag2_key_cipher_to_disk(key, disk_key);
     flipper_format_rewind(flipper_format);
-    if(!flipper_format_insert_or_update_hex(flipper_format, FIAT_V1_HITAG2_KEY_FIELD, key, 6U)) {
+    if(!flipper_format_insert_or_update_hex(
+           flipper_format, FIAT_V1_HITAG2_KEY_FIELD, disk_key, 6U)) {
         return false;
     }
     uint32_t epoch = 0U;
