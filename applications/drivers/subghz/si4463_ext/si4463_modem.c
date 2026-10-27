@@ -187,16 +187,20 @@ bool si4463_modem_profile_valid(int8_t profile) {
     return si4463_modem_profile_known(profile) && si4463_wds_profiles[profile].stream;
 }
 
-uint8_t si4463_modem_profile_pkt_config1(int8_t profile) {
-    uint8_t value = SI4463_PKT_CONFIG1;
-    if(!si4463_modem_profile_valid(profile)) return value;
-    const uint8_t* s = si4463_wds_profiles[profile].stream;
+static uint8_t
+    si4463_modem_stream_prop(const uint8_t* s, uint8_t group, uint8_t prop, uint8_t value) {
     for(size_t pos = 0; s[pos]; pos += 1 + s[pos]) {
         const uint8_t* cmd = &s[pos + 1];
-        if(cmd[1] == 0x12 && cmd[3] <= 0x06 && 0x06 < cmd[3] + cmd[2])
-            value = cmd[4 + 0x06 - cmd[3]];
+        if(cmd[0] == 0x11 && cmd[1] == group && cmd[3] <= prop && prop < cmd[3] + cmd[2])
+            value = cmd[4 + prop - cmd[3]];
     }
     return value;
+}
+
+uint8_t si4463_modem_profile_pkt_config1(int8_t profile) {
+    if(!si4463_modem_profile_valid(profile)) return SI4463_PKT_CONFIG1;
+    return si4463_modem_stream_prop(
+        si4463_wds_profiles[profile].stream, 0x12, 0x06, SI4463_PKT_CONFIG1);
 }
 
 bool si4463_modem_profile_is_ook(int8_t profile) {
@@ -236,11 +240,80 @@ bool si4463_modem_apply_tx(Si4463CmdSend send, void* context, const Si4463Modem*
     return send(deviation, sizeof(deviation), context) && send(pa, sizeof(pa), context);
 }
 
+typedef struct {
+    uint8_t prop;
+    uint8_t value;
+} Si4463ModemProp;
+
+typedef struct {
+    uint8_t prop;
+    uint8_t clear;
+    uint8_t set;
+    uint8_t fallback;
+} Si4463ModemPropPatch;
+
+static const Si4463ModemPropPatch si4463_raw_rx_patches[] = {
+    {0x35, 0x00, 0x80, 0xE0}, /* AGC_CONTROL: AGCOVPKT, AGC over the whole stream */
+    {0x42, 0x03, 0x00, 0x84}, /* OOK_CNT1: no squelch */
+    {0x43, 0x10, 0x00, 0x23}, /* OOK_MISC: no OOK squelch */
+    {0x4C, 0x20, 0x00, 0x00}, /* RSSI_CONTROL: no RX timeout on latched RSSI */
+    {0x4D, 0xFF, 0x00, 0x00}, /* RSSI_CONTROL2: an RSSI jump never resets RX */
+    {0x50, 0x80, 0x00, 0x94}, /* RAW_SEARCH2: no SCH_FRZEN */
+    {0x55, 0x80, 0x00, 0x07}, /* no one-shot AFC */
+    {0x5E, 0x80, 0x00, 0x78}, /* DSA_RSSI: no DSA RSSI squelch */
+};
+
+static const Si4463ModemProp si4463_ook_overrides[] = {
+    {0x29, 0x02}, /* BCR_GEAR */
+    {0x2B, 0x08}, /* BCR_MISC0 */
+    {0x35, 0xEA}, /* AGC_CONTROL: AGCOVPKT, slow AGC */
+    {0x39, 0xFF}, /* AGC_RFPD_DECAY */
+    {0x3A, 0xFF}, /* AGC_IFPD_DECAY */
+    {0x40, 0x2C}, /* OOK_PDTC */
+    {0x41, 0x0C}, /* OOK_BLOPK */
+    {0x42, 0x84}, /* OOK_CNT1: no OOKFRZEN, no squelch */
+    {0x43, 0x0D}, /* OOK_MISC: peak detector only, discharge /8 */
+    {0x45, 0x00}, /* RAW_CONTROL */
+    {0x4C, 0x00}, /* RSSI_CONTROL: no RX timeout on latched RSSI */
+    {0x4D, 0x00}, /* RSSI_CONTROL2: an RSSI jump never resets RX */
+    {0x54, 0x83}, /* SPIKE_DET */
+    {0x5B, 0xA0}, /* DSA_CTRL1 */
+    {0x5D, 0x04}, /* DSA_QUAL */
+    {0x5E, 0x78}, /* DSA_RSSI: no DSA RSSI squelch */
+};
+
+static bool si4463_modem_set_prop(Si4463CmdSend send, void* context, uint8_t prop, uint8_t value) {
+    const uint8_t cmd[] = {0x11, 0x20, 0x01, prop, value};
+    return send(cmd, sizeof(cmd), context);
+}
+
+static bool si4463_modem_apply_raw_rx_patches(
+    Si4463CmdSend send,
+    void* context,
+    const Si4463WdsProfile* profile) {
+    for(size_t i = 0; i < sizeof(si4463_raw_rx_patches) / sizeof(si4463_raw_rx_patches[0]); i++) {
+        const Si4463ModemPropPatch* patch = &si4463_raw_rx_patches[i];
+        const uint8_t value =
+            si4463_modem_stream_prop(profile->stream, 0x20, patch->prop, patch->fallback);
+        if(!si4463_modem_set_prop(
+               send, context, patch->prop, (value & (uint8_t)~patch->clear) | patch->set))
+            return false;
+    }
+    if(!profile->ook) return true;
+    for(size_t i = 0; i < sizeof(si4463_ook_overrides) / sizeof(si4463_ook_overrides[0]); i++) {
+        if(!si4463_modem_set_prop(
+               send, context, si4463_ook_overrides[i].prop, si4463_ook_overrides[i].value))
+            return false;
+    }
+    return true;
+}
+
 bool si4463_modem_apply(Si4463CmdSend send, void* context, const Si4463Modem* modem) {
     if(!si4463_modem_profile_valid(modem->wds_profile)) return false;
     const Si4463WdsProfile* profile = &si4463_wds_profiles[modem->wds_profile];
     if(!STREAM(neutral)) return false;
     if(!si4463_stream(send, context, profile->stream, profile->size)) return false;
+    if(!si4463_modem_apply_raw_rx_patches(send, context, profile)) return false;
     const uint8_t mod[] = {
         0x11, 0x20, 0x01, 0x00, profile->ook ? SI4463_MOD_OOK : SI4463_MOD_2FSK};
     return send(mod, sizeof(mod), context) && si4463_modem_apply_tx(send, context, modem);
