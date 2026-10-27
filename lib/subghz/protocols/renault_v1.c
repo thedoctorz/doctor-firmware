@@ -1486,7 +1486,13 @@ void subghz_protocol_decoder_hitag2_get_string(void* context, FuriString* output
         instance->generic.data_count_bit,
         instance->tx_variant);
 
-    if(instance->recovered == HITAG2_RECOVERED_YES) {
+    if(instance->hell_key_valid) {
+        furi_string_cat_printf(
+            output,
+            "\r\nCnt:%03lX Hop:%08lX\r\nHell",
+            (unsigned long)(instance->generic.cnt & 0x3FFU),
+            (unsigned long)instance->hop);
+    } else if(instance->recovered == HITAG2_RECOVERED_YES) {
         furi_string_cat_printf(
             output,
             "\r\nIV:%08lX Cnt:%04lX",
@@ -1497,14 +1503,9 @@ void subghz_protocol_decoder_hitag2_get_string(void* context, FuriString* output
     } else {
         furi_string_cat_printf(
             output,
-            "\r\nCnt:%03lX Hop:%08lX",
+            "\r\nCnt:%03lX Hop:%08lX\r\nHell (key needed)",
             (unsigned long)(instance->generic.cnt & 0x3FFU),
             (unsigned long)instance->hop);
-        if(instance->hell_key_valid) {
-            furi_string_cat_printf(output, "\r\nHell");
-        } else {
-            furi_string_cat_printf(output, "\r\nHell (key needed)");
-        }
     }
 }
 
