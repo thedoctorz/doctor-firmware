@@ -33,6 +33,14 @@ struct SubGhzProtocolDecoderAlutech_at_4n {
     uint16_t header_count;
 
     const char* alutech_at_4n_rainbow_table_file_name;
+
+    bool analysis_valid;
+    uint64_t analysis_data;
+    uint16_t analysis_bits;
+    uint32_t analysis_crc;
+    uint32_t analysis_serial;
+    uint32_t analysis_cnt;
+    uint8_t analysis_btn;
 };
 SUBGHZ_ASSERT_DECODER_COMMON_LAYOUT(SubGhzProtocolDecoderAlutech_at_4n);
 
@@ -510,6 +518,7 @@ SubGhzProtocolStatus subghz_protocol_encoder_alutech_at_4n_deserialize(
 void* subghz_protocol_decoder_alutech_at_4n_alloc(SubGhzEnvironment* environment) {
     SubGhzProtocolDecoderAlutech_at_4n* instance = subghz_protocol_decoder_common_alloc(
         sizeof(SubGhzProtocolDecoderAlutech_at_4n), &subghz_protocol_alutech_at_4n);
+    instance->analysis_valid = false;
     instance->alutech_at_4n_rainbow_table_file_name =
         subghz_environment_get_alutech_at_4n_rainbow_table_file_name(environment);
     if(instance->alutech_at_4n_rainbow_table_file_name) {
@@ -692,14 +701,40 @@ uint8_t subghz_protocol_decoder_alutech_at_4n_get_hash_data(void* context) {
     return (uint8_t)instance->crc;
 }
 
+static void
+    subghz_protocol_decoder_alutech_at_4n_analyze(SubGhzProtocolDecoderAlutech_at_4n* instance) {
+    if(instance->analysis_valid && instance->analysis_data == instance->generic.data &&
+       instance->analysis_bits == instance->generic.data_count_bit &&
+       instance->analysis_crc == instance->crc) {
+        instance->generic.serial = instance->analysis_serial;
+        instance->generic.cnt = instance->analysis_cnt;
+        instance->generic.btn = instance->analysis_btn;
+        if(!subghz_custom_btn_has_original()) {
+            subghz_custom_btn_set_original(instance->generic.btn);
+        }
+        subghz_custom_btn_set_max(4);
+        return;
+    }
+
+    subghz_protocol_alutech_at_4n_remote_controller(
+        &instance->generic, instance->crc, instance->alutech_at_4n_rainbow_table_file_name);
+
+    instance->analysis_valid = true;
+    instance->analysis_data = instance->generic.data;
+    instance->analysis_bits = instance->generic.data_count_bit;
+    instance->analysis_crc = instance->crc;
+    instance->analysis_serial = instance->generic.serial;
+    instance->analysis_cnt = instance->generic.cnt;
+    instance->analysis_btn = instance->generic.btn;
+}
+
 SubGhzProtocolStatus subghz_protocol_decoder_alutech_at_4n_serialize(
     void* context,
     FlipperFormat* flipper_format,
     SubGhzRadioPreset* preset) {
     furi_assert(context);
     SubGhzProtocolDecoderAlutech_at_4n* instance = context;
-    subghz_protocol_alutech_at_4n_remote_controller(
-        &instance->generic, instance->crc, instance->alutech_at_4n_rainbow_table_file_name);
+    subghz_protocol_decoder_alutech_at_4n_analyze(instance);
     SubGhzProtocolStatus res =
         subghz_block_generic_serialize(&instance->generic, flipper_format, preset);
     if(!flipper_format_rewind(flipper_format)) {
@@ -719,6 +754,7 @@ SubGhzProtocolStatus subghz_protocol_decoder_alutech_at_4n_deserialize(
     FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolDecoderAlutech_at_4n* instance = context;
+    instance->analysis_valid = false;
     SubGhzProtocolStatus ret = SubGhzProtocolStatusError;
     do {
         ret = subghz_block_generic_deserialize_check_count_bit(
@@ -855,8 +891,7 @@ static uint8_t subghz_protocol_alutech_at_4n_get_btn_code(void) {
 void subghz_protocol_decoder_alutech_at_4n_get_string(void* context, FuriString* output) {
     furi_assert(context);
     SubGhzProtocolDecoderAlutech_at_4n* instance = context;
-    subghz_protocol_alutech_at_4n_remote_controller(
-        &instance->generic, instance->crc, instance->alutech_at_4n_rainbow_table_file_name);
+    subghz_protocol_decoder_alutech_at_4n_analyze(instance);
     uint32_t code_found_hi = instance->generic.data >> 32;
     uint32_t code_found_lo = instance->generic.data & 0x00000000ffffffff;
 

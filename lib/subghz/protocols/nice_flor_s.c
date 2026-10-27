@@ -58,6 +58,16 @@ struct SubGhzProtocolDecoderNiceFlorS {
     uint32_t pending_body;
     bool has_pending;
     bool skip_o_code;
+
+    bool analysis_valid;
+    uint64_t analysis_data;
+    uint64_t analysis_data_2;
+    uint16_t analysis_bits;
+    uint16_t analysis_ic;
+    bool analysis_o_code;
+    uint32_t analysis_serial;
+    uint32_t analysis_cnt;
+    uint8_t analysis_btn;
 };
 SUBGHZ_ASSERT_DECODER_COMMON_LAYOUT(SubGhzProtocolDecoderNiceFlorS);
 
@@ -680,6 +690,7 @@ void* subghz_protocol_decoder_nice_flor_s_alloc(SubGhzEnvironment* environment) 
     instance->pending_body = 0;
     instance->has_pending = false;
     instance->skip_o_code = true;
+    instance->analysis_valid = false;
     instance->nice_flor_s_rainbow_table_file_name =
         subghz_environment_get_nice_flor_s_rainbow_table_file_name(environment);
     if(instance->nice_flor_s_rainbow_table_file_name) {
@@ -893,17 +904,47 @@ static void subghz_protocol_nice_flor_s_remote_controller(
     subghz_custom_btn_set_max(4);
 }
 
+static void
+    subghz_protocol_decoder_nice_flor_s_analyze(SubGhzProtocolDecoderNiceFlorS* instance) {
+    if(instance->analysis_valid && instance->analysis_data == instance->generic.data &&
+       instance->analysis_data_2 == instance->generic.data_2 &&
+       instance->analysis_bits == instance->generic.data_count_bit &&
+       instance->analysis_ic == instance->ic && instance->analysis_o_code == instance->o_code) {
+        instance->generic.serial = instance->analysis_serial;
+        instance->generic.cnt = instance->analysis_cnt;
+        instance->generic.btn = instance->analysis_btn;
+
+        if(!subghz_custom_btn_has_original()) {
+            subghz_custom_btn_set_original(instance->generic.btn);
+        }
+        subghz_custom_btn_set_max(4);
+        return;
+    }
+
+    subghz_protocol_nice_flor_s_remote_controller(
+        &instance->generic,
+        instance->nice_flor_s_rainbow_table_file_name,
+        instance->ic,
+        instance->o_code);
+
+    instance->analysis_valid = true;
+    instance->analysis_data = instance->generic.data;
+    instance->analysis_data_2 = instance->generic.data_2;
+    instance->analysis_bits = instance->generic.data_count_bit;
+    instance->analysis_ic = instance->ic;
+    instance->analysis_o_code = instance->o_code;
+    instance->analysis_serial = instance->generic.serial;
+    instance->analysis_cnt = instance->generic.cnt;
+    instance->analysis_btn = instance->generic.btn;
+}
+
 SubGhzProtocolStatus subghz_protocol_decoder_nice_flor_s_serialize(
     void* context,
     FlipperFormat* flipper_format,
     SubGhzRadioPreset* preset) {
     furi_assert(context);
     SubGhzProtocolDecoderNiceFlorS* instance = context;
-    subghz_protocol_nice_flor_s_remote_controller(
-        &instance->generic,
-        instance->nice_flor_s_rainbow_table_file_name,
-        instance->ic,
-        instance->o_code);
+    subghz_protocol_decoder_nice_flor_s_analyze(instance);
     SubGhzProtocolStatus ret =
         subghz_block_generic_serialize(&instance->generic, flipper_format, preset);
     if((ret == SubGhzProtocolStatusOk) && instance->o_code) {
@@ -933,6 +974,7 @@ SubGhzProtocolStatus
     subghz_protocol_decoder_nice_flor_s_deserialize(void* context, FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolDecoderNiceFlorS* instance = context;
+    instance->analysis_valid = false;
     SubGhzProtocolStatus ret = SubGhzProtocolStatusError;
     do {
         ret = subghz_block_generic_deserialize(&instance->generic, flipper_format);
@@ -1089,11 +1131,7 @@ void subghz_protocol_decoder_nice_flor_s_get_string(void* context, FuriString* o
     furi_assert(context);
     SubGhzProtocolDecoderNiceFlorS* instance = context;
 
-    subghz_protocol_nice_flor_s_remote_controller(
-        &instance->generic,
-        instance->nice_flor_s_rainbow_table_file_name,
-        instance->ic,
-        instance->o_code);
+    subghz_protocol_decoder_nice_flor_s_analyze(instance);
 
     // push protocol data to global variable
     subghz_block_generic_global.cnt_is_available = true;

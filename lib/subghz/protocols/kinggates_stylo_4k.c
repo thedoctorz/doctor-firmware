@@ -28,6 +28,14 @@ struct SubGhzProtocolDecoderKingGates_stylo_4k {
 
     uint16_t header_count;
     SubGhzKeystore* keystore;
+
+    bool analysis_valid;
+    bool analysis_ret;
+    uint64_t analysis_data;
+    uint64_t analysis_data_2;
+    uint32_t analysis_serial;
+    uint32_t analysis_cnt;
+    uint8_t analysis_btn;
 };
 SUBGHZ_ASSERT_DECODER_COMMON_LAYOUT(SubGhzProtocolDecoderKingGates_stylo_4k);
 
@@ -90,7 +98,7 @@ const SubGhzProtocol subghz_protocol_kinggates_stylo_4k = {
 //
 
 // Pre define function
-static void subghz_protocol_kinggates_stylo_4k_remote_controller(
+static bool subghz_protocol_kinggates_stylo_4k_remote_controller(
     SubGhzBlockGeneric* instance,
     SubGhzKeystore* keystore);
 
@@ -370,6 +378,7 @@ void* subghz_protocol_decoder_kinggates_stylo_4k_alloc(SubGhzEnvironment* enviro
     SubGhzProtocolDecoderKingGates_stylo_4k* instance = subghz_protocol_decoder_common_alloc(
         sizeof(SubGhzProtocolDecoderKingGates_stylo_4k), &subghz_protocol_kinggates_stylo_4k);
     instance->keystore = subghz_environment_get_keystore(environment);
+    instance->analysis_valid = false;
     return instance;
 }
 
@@ -478,7 +487,7 @@ void subghz_protocol_decoder_kinggates_stylo_4k_feed(void* context, bool level, 
  * @param data Input encrypted data
  * @param keystore Pointer to a SubGhzKeystore* instance
  */
-static void subghz_protocol_kinggates_stylo_4k_remote_controller(
+static bool subghz_protocol_kinggates_stylo_4k_remote_controller(
     SubGhzBlockGeneric* instance,
     SubGhzKeystore* keystore) {
     /**
@@ -532,6 +541,35 @@ static void subghz_protocol_kinggates_stylo_4k_remote_controller(
         instance->serial = 0;
         instance->cnt = 0;
     }
+    return ret;
+}
+
+static void subghz_protocol_decoder_kinggates_stylo_4k_analyze(
+    SubGhzProtocolDecoderKingGates_stylo_4k* instance) {
+    if(instance->analysis_valid && instance->analysis_data == instance->generic.data &&
+       instance->analysis_data_2 == instance->generic.data_2) {
+        instance->generic.btn = instance->analysis_btn;
+        instance->generic.serial = instance->analysis_serial;
+        instance->generic.cnt = instance->analysis_cnt;
+        if(instance->analysis_ret) {
+            if(!subghz_custom_btn_has_original()) {
+                subghz_custom_btn_set_original(instance->generic.btn);
+            }
+            subghz_custom_btn_set_max(3);
+        }
+        return;
+    }
+
+    const bool ret = subghz_protocol_kinggates_stylo_4k_remote_controller(
+        &instance->generic, instance->keystore);
+
+    instance->analysis_valid = true;
+    instance->analysis_ret = ret;
+    instance->analysis_data = instance->generic.data;
+    instance->analysis_data_2 = instance->generic.data_2;
+    instance->analysis_btn = instance->generic.btn;
+    instance->analysis_serial = instance->generic.serial;
+    instance->analysis_cnt = instance->generic.cnt;
 }
 
 SubGhzProtocolStatus subghz_protocol_decoder_kinggates_stylo_4k_serialize(
@@ -540,7 +578,7 @@ SubGhzProtocolStatus subghz_protocol_decoder_kinggates_stylo_4k_serialize(
     SubGhzRadioPreset* preset) {
     furi_assert(context);
     SubGhzProtocolDecoderKingGates_stylo_4k* instance = context;
-    subghz_protocol_kinggates_stylo_4k_remote_controller(&instance->generic, instance->keystore);
+    subghz_protocol_decoder_kinggates_stylo_4k_analyze(instance);
     return subghz_protocol_decoder_common_serialize_data_2(context, flipper_format, preset);
 }
 
@@ -549,6 +587,7 @@ SubGhzProtocolStatus subghz_protocol_decoder_kinggates_stylo_4k_deserialize(
     FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolDecoderKingGates_stylo_4k* instance = context;
+    instance->analysis_valid = false;
     SubGhzProtocolStatus ret = SubGhzProtocolStatusError;
     do {
         ret = subghz_block_generic_deserialize_check_count_bit(
@@ -648,7 +687,7 @@ static uint8_t subghz_protocol_kinggates_stylo_4k_get_btn_code(void) {
 void subghz_protocol_decoder_kinggates_stylo_4k_get_string(void* context, FuriString* output) {
     furi_assert(context);
     SubGhzProtocolDecoderKingGates_stylo_4k* instance = context;
-    subghz_protocol_kinggates_stylo_4k_remote_controller(&instance->generic, instance->keystore);
+    subghz_protocol_decoder_kinggates_stylo_4k_analyze(instance);
 
     // push protocol data to global variable
     subghz_block_generic_global.cnt_is_available = true;

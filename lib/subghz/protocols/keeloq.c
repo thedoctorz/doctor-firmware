@@ -45,6 +45,18 @@ struct SubGhzProtocolDecoderKeeloq {
     const char* manufacture_name;
 
     FuriString* manufacture_from_file;
+
+    bool analysis_valid;
+    uint64_t analysis_data;
+    uint16_t analysis_bits;
+    uint32_t analysis_input_seed;
+    uint32_t analysis_seed;
+    uint32_t analysis_counter;
+    uint32_t analysis_serial;
+    uint32_t analysis_decrypt;
+    uint8_t analysis_button;
+    uint8_t analysis_type;
+    const char* analysis_manufacture;
 };
 SUBGHZ_ASSERT_DECODER_COMMON_LAYOUT(SubGhzProtocolDecoderKeeloq);
 
@@ -69,6 +81,7 @@ typedef enum {
 } KeeloqDecoderStep;
 
 static uint8_t keeloq_counter_mode = 0;
+static uint16_t keeloq_temp_counter = 0; // Counter retained for programming mode.
 
 const SubGhzProtocolDecoder subghz_protocol_keeloq_decoder = {
     .alloc = subghz_protocol_decoder_keeloq_alloc,
@@ -887,6 +900,7 @@ void* subghz_protocol_decoder_keeloq_alloc(SubGhzEnvironment* environment) {
         sizeof(SubGhzProtocolDecoderKeeloq), &subghz_protocol_keeloq);
     instance->keystore = subghz_environment_get_keystore(environment);
     instance->manufacture_from_file = furi_string_alloc();
+    instance->analysis_valid = false;
 
     subghz_custom_btn_set_prog_mode(PROG_MODE_OFF);
     return instance;
@@ -1450,7 +1464,6 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller(
     uint64_t key = subghz_protocol_blocks_reverse_key(instance->data, instance->data_count_bit);
     uint32_t key_fix = key >> 32;
     uint32_t key_hop = key & 0x00000000ffffffff;
-    static uint16_t temp_counter = 0; // Be careful with prog_mode
     uint32_t resdecrypt = 0;
 
     // If we are in BFT / Aprimatic / Dea_Mio programming mode we will set previous remembered counter and skip mf keys check
@@ -1498,23 +1511,23 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller(
             }
         }
         // Save original counter as temp counter in case of later usage of prog mode
-        temp_counter = instance->cnt;
+        keeloq_temp_counter = instance->cnt;
 
     } else if(prog_mode == PROG_MODE_KEELOQ_BFT) {
         // When we are in prog mode we should fix mfname and apply temp counter
         *manufacture_name = "BFT";
         keystore->mfname = *manufacture_name;
-        instance->cnt = temp_counter;
+        instance->cnt = keeloq_temp_counter;
     } else if(prog_mode == PROG_MODE_KEELOQ_APRIMATIC) {
         // When we are in prog mode we should fix mfname and apply temp counter
         *manufacture_name = "Aprimatic";
         keystore->mfname = *manufacture_name;
-        instance->cnt = temp_counter;
+        instance->cnt = keeloq_temp_counter;
     } else if(prog_mode == PROG_MODE_KEELOQ_DEA_MIO) {
         // When we are in prog mode we should fix mfname and apply temp counter
         *manufacture_name = "Dea_Mio";
         keystore->mfname = *manufacture_name;
-        instance->cnt = temp_counter;
+        instance->cnt = keeloq_temp_counter;
     } else {
         // Counter protection
         furi_crash("Unsupported Prog Mode");
@@ -1536,6 +1549,46 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller(
     return resdecrypt;
 }
 
+static uint32_t subghz_protocol_decoder_keeloq_analyze(SubGhzProtocolDecoderKeeloq* instance) {
+    const uint32_t seed = instance->generic.seed;
+    const bool normal_mode = subghz_custom_btn_get_prog_mode() == PROG_MODE_OFF;
+    const char* selected = instance->keystore->mfname;
+    if(normal_mode && instance->analysis_valid &&
+       instance->analysis_data == instance->generic.data &&
+       instance->analysis_bits == instance->generic.data_count_bit &&
+       (seed == instance->analysis_input_seed || seed == instance->analysis_seed) &&
+       (!selected || !*selected || !strcmp(selected, instance->analysis_manufacture))) {
+        instance->generic.seed = instance->analysis_seed;
+        instance->generic.cnt = instance->analysis_counter;
+        keeloq_temp_counter = instance->analysis_counter;
+        instance->generic.serial = instance->analysis_serial;
+        instance->generic.btn = instance->analysis_button;
+        instance->manufacture_name = instance->analysis_manufacture;
+        instance->keystore->mfname = instance->analysis_manufacture;
+        instance->keystore->kl_type = instance->analysis_type;
+        if(!subghz_custom_btn_has_original()) {
+            subghz_custom_btn_set_original(instance->generic.btn);
+        }
+        subghz_custom_btn_set_max(4);
+        return instance->analysis_decrypt;
+    }
+
+    const uint32_t decrypt = subghz_protocol_keeloq_check_remote_controller(
+        &instance->generic, instance->keystore, &instance->manufacture_name);
+    instance->analysis_valid = normal_mode;
+    instance->analysis_data = instance->generic.data;
+    instance->analysis_bits = instance->generic.data_count_bit;
+    instance->analysis_input_seed = seed;
+    instance->analysis_seed = instance->generic.seed;
+    instance->analysis_counter = instance->generic.cnt;
+    instance->analysis_serial = instance->generic.serial;
+    instance->analysis_button = instance->generic.btn;
+    instance->analysis_manufacture = instance->manufacture_name;
+    instance->analysis_type = instance->keystore->kl_type;
+    instance->analysis_decrypt = decrypt;
+    return decrypt;
+}
+
 SubGhzProtocolStatus subghz_protocol_decoder_keeloq_serialize(
     void* context,
     FlipperFormat* flipper_format,
@@ -1543,8 +1596,7 @@ SubGhzProtocolStatus subghz_protocol_decoder_keeloq_serialize(
     furi_assert(context);
     SubGhzProtocolDecoderKeeloq* instance = context;
 
-    subghz_protocol_keeloq_check_remote_controller(
-        &instance->generic, instance->keystore, &instance->manufacture_name);
+    subghz_protocol_decoder_keeloq_analyze(instance);
 
     const uint32_t seed = instance->generic.seed;
     instance->generic.seed = 0;
@@ -1581,6 +1633,7 @@ SubGhzProtocolStatus
     subghz_protocol_decoder_keeloq_deserialize(void* context, FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolDecoderKeeloq* instance = context;
+    instance->analysis_valid = false;
     SubGhzProtocolStatus res = SubGhzProtocolStatusError;
     do {
         if(SubGhzProtocolStatusOk !=
@@ -1805,8 +1858,7 @@ void subghz_protocol_decoder_keeloq_get_string(void* context, FuriString* output
     uint32_t hopdecrypt = 0;
     // Try to get decrypt for display if mf is known, if not it will be 0 and display will be without decrypt part since it might come already decrypted like in HCS101 or AN-Motors
     // Or we might have Unknown MF
-    hopdecrypt = subghz_protocol_keeloq_check_remote_controller(
-        &instance->generic, instance->keystore, &instance->manufacture_name);
+    hopdecrypt = subghz_protocol_decoder_keeloq_analyze(instance);
 
     uint32_t code_found_hi = instance->generic.data >> 32;
     uint32_t code_found_lo = instance->generic.data & 0x00000000ffffffff;
