@@ -3,6 +3,10 @@
 #include <lib/subghz/subghz_decode_raw.h>
 #include <lib/subghz/subghz_rx_session.h>
 #include <lib/subghz/subghz_setting.h>
+#include <lib/subghz/devices/devices.h>
+#include <lib/subghz/devices/registry.h>
+#include <lib/subghz/devices/radio_device_loader.h>
+#include <loader/loader.h>
 #include <flipper_format/flipper_format.h>
 #include <flipper_format/flipper_format_i.h>
 #include <storage/storage.h>
@@ -173,6 +177,29 @@ static void rpc_subghz_decode_raw_stop_process(const PB_Main* request, void* con
 
 #define RPC_SUBGHZ_SETTING_FILE EXT_PATH("subghz/assets/setting_user")
 
+static bool rpc_subghz_si4463_connected(RpcSubGhz* rpc_subghz) {
+    if(rpc_subghz->rx && subghz_rx_session_is_running(rpc_subghz->rx)) {
+        SubGhzRxState state = {0};
+        subghz_rx_session_get_state(rpc_subghz->rx, &state);
+        return state.device_name && !strcmp(state.device_name, SUBGHZ_DEVICE_SI4463_EXT_NAME);
+    }
+
+    Loader* loader = furi_record_open(RECORD_LOADER);
+    bool si_connected = false;
+    if(loader_lock(loader)) {
+        if(!subghz_device_registry_is_valid()) {
+            subghz_devices_init();
+            si_connected =
+                !radio_device_loader_is_connect_external(SUBGHZ_DEVICE_CC1101_EXT_NAME) &&
+                radio_device_loader_is_connect_external(SUBGHZ_DEVICE_SI4463_EXT_NAME);
+            subghz_devices_deinit();
+        }
+        loader_unlock(loader);
+    }
+    furi_record_close(RECORD_LOADER);
+    return si_connected;
+}
+
 static void rpc_subghz_settings_process(const PB_Main* request, void* context) {
     furi_assert(request);
     furi_assert(context);
@@ -208,14 +235,28 @@ static void rpc_subghz_settings_process(const PB_Main* request, void* context) {
         payload->hopper_frequencies_count = hoppers;
     }
 
+    const bool si_connected = rpc_subghz_si4463_connected(rpc_subghz);
+
     const size_t presets = subghz_setting_get_preset_count(setting);
     if(presets) {
+        const bool has_si = subghz_setting_has_si4463_preset(setting);
         payload->presets = malloc(sizeof(char*) * presets);
+        size_t count = 0;
         for(size_t i = 0; i < presets; i++) {
+            const bool si_preset = subghz_setting_preset_is_si4463(setting, i);
+            if(si_connected) {
+                if(!(si_preset || !has_si)) continue;
+            } else if(si_preset) {
+                continue;
+            }
             const char* name = subghz_setting_get_preset_name(setting, i);
-            payload->presets[i] = strdup(name ? name : "");
+            payload->presets[count++] = strdup(name ? name : "");
         }
-        payload->presets_count = presets;
+        payload->presets_count = count;
+        if(count == 0) {
+            free(payload->presets);
+            payload->presets = NULL;
+        }
     }
 
     payload->default_frequency = subghz_setting_get_default_frequency(setting);
