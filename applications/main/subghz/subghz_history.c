@@ -32,6 +32,7 @@ typedef struct {
 } SubGhzHistoryStruct;
 
 struct SubGhzHistory {
+    FuriMutex* format_mutex;
     uint16_t last_index_write;
     FuriString* tmp_string;
     SubGhzHistoryStruct* history;
@@ -44,6 +45,7 @@ struct SubGhzHistory {
 
 SubGhzHistory* subghz_history_alloc(void) {
     SubGhzHistory* instance = malloc(sizeof(SubGhzHistory));
+    instance->format_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     instance->tmp_string = furi_string_alloc();
     instance->history = malloc(sizeof(SubGhzHistoryStruct));
     SubGhzHistoryItemArray_init(instance->history->data);
@@ -74,12 +76,14 @@ void subghz_history_free(SubGhzHistory* instance) {
         M_EACH(item, instance->history->data, SubGhzHistoryItemArray_t) {
             furi_string_free(item->item_str);
             furi_string_free(item->preset->name);
+            free(item->preset->data);
             free(item->preset);
             flipper_format_free(item->flipper_string);
             item->type = 0;
         }
     SubGhzHistoryItemArray_clear(instance->history->data);
     free(instance->history);
+    furi_mutex_free(instance->format_mutex);
     free(instance);
 }
 
@@ -108,6 +112,7 @@ void subghz_history_reset(SubGhzHistory* instance) {
         M_EACH(item, instance->history->data, SubGhzHistoryItemArray_t) {
             furi_string_free(item->item_str);
             furi_string_free(item->preset->name);
+            free(item->preset->data);
             free(item->preset);
             flipper_format_free(item->flipper_string);
             item->type = 0;
@@ -118,17 +123,20 @@ void subghz_history_reset(SubGhzHistory* instance) {
 
 void subghz_history_delete_item(SubGhzHistory* instance, uint16_t idx) {
     furi_assert(instance);
+    furi_mutex_acquire(instance->format_mutex, FuriWaitForever);
 
     if(idx < SubGhzHistoryItemArray_size(instance->history->data)) {
         SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, idx);
         furi_string_free(item->item_str);
         furi_string_free(item->preset->name);
+        free(item->preset->data);
         free(item->preset);
         flipper_format_free(item->flipper_string);
         item->type = 0;
         SubGhzHistoryItemArray_remove_v(instance->history->data, idx, idx + 1);
         instance->last_index_write--;
     }
+    furi_mutex_release(instance->format_mutex);
 }
 
 uint16_t subghz_history_get_item(SubGhzHistory* instance) {
@@ -195,6 +203,31 @@ FlipperFormat* subghz_history_get_raw_data(SubGhzHistory* instance, uint16_t idx
     } else {
         return NULL;
     }
+}
+
+FlipperFormat* subghz_history_get_raw_data_copy(SubGhzHistory* instance, uint16_t idx) {
+    furi_assert(instance);
+    FlipperFormat* copy = flipper_format_string_alloc();
+    bool copied = false;
+
+    furi_mutex_acquire(instance->format_mutex, FuriWaitForever);
+    if(idx < instance->last_index_write) {
+        FlipperFormat* raw = subghz_history_get_raw_data(instance, idx);
+        if(raw) {
+            Stream* source = flipper_format_get_raw_stream(raw);
+            const size_t position = stream_tell(source);
+            const size_t size = stream_size(source);
+            copied = size && stream_copy_full(source, flipper_format_get_raw_stream(copy)) == size;
+            stream_seek(source, position, StreamOffsetFromStart);
+        }
+    }
+    furi_mutex_release(instance->format_mutex);
+
+    if(!copied) {
+        flipper_format_free(copy);
+        copy = NULL;
+    }
+    return copy;
 }
 bool subghz_history_get_text_space_left(SubGhzHistory* instance, FuriString* output) {
     furi_assert(instance);
@@ -313,10 +346,10 @@ static bool subghz_history_is_duplicate_item(FlipperFormat* stored, FlipperForma
     return duplicate;
 }
 
-static bool subghz_history_is_duplicate(SubGhzHistory* instance, FlipperFormat* candidate) {
+static bool subghz_history_is_duplicate(SubGhzHistory* instance, FlipperFormat* candidate, uint8_t source) {
     for
         M_EACH(item, instance->history->data, SubGhzHistoryItemArray_t) {
-            if(item->flipper_string &&
+            if(item->source == source && item->flipper_string &&
                subghz_history_is_duplicate_item(item->flipper_string, candidate)) {
                 return true;
             }
@@ -506,7 +539,7 @@ bool subghz_history_add_to_history(
     return subghz_history_add_to_history_source(instance, context, preset, 0);
 }
 
-bool subghz_history_add_to_history_source(
+static bool subghz_history_add_to_history_source_locked(
     SubGhzHistory* instance,
     void* context,
     SubGhzRadioPreset* preset,
@@ -526,7 +559,7 @@ bool subghz_history_add_to_history_source(
         return false;
     }
 
-    if(subghz_history_is_duplicate(instance, flipper_string)) {
+    if(subghz_history_is_duplicate(instance, flipper_string, source)) {
         flipper_format_free(flipper_string);
         return false;
     }
@@ -539,7 +572,11 @@ bool subghz_history_add_to_history_source(
     item->preset->frequency = preset->frequency;
     item->preset->name = furi_string_alloc();
     furi_string_set(item->preset->name, preset->name);
-    item->preset->data = preset->data;
+    item->preset->data = NULL;
+    if(preset->data && preset->data_size) {
+        item->preset->data = malloc(preset->data_size);
+        memcpy(item->preset->data, preset->data, preset->data_size);
+    }
     item->preset->data_size = preset->data_size;
     furi_hal_rtc_get_datetime(&item->datetime);
 
@@ -565,4 +602,17 @@ bool subghz_history_add_to_history_source(
 
     instance->last_index_write++;
     return true;
+}
+
+bool subghz_history_add_to_history_source(
+    SubGhzHistory* instance,
+    void* context,
+    SubGhzRadioPreset* preset,
+    uint8_t source) {
+    furi_assert(instance);
+    furi_mutex_acquire(instance->format_mutex, FuriWaitForever);
+    const bool added =
+        subghz_history_add_to_history_source_locked(instance, context, preset, source);
+    furi_mutex_release(instance->format_mutex);
+    return added;
 }

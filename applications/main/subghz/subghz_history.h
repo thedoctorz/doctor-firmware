@@ -171,3 +171,4 @@ uint8_t subghz_history_get_source(SubGhzHistory* instance, uint16_t idx);
  * @return SubGhzProtocolCommonLoad*
  */
 FlipperFormat* subghz_history_get_raw_data(SubGhzHistory* instance, uint16_t idx);
+FlipperFormat* subghz_history_get_raw_data_copy(SubGhzHistory* instance, uint16_t idx);
