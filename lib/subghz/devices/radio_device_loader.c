@@ -12,6 +12,7 @@
 static bool radio_device_loader_otg_enabled_by_loader = false;
 
 static void radio_device_loader_power_on(void) {
+    if(furi_hal_power_is_otg_enabled()) return;
     uint8_t attempts = 0;
     while(!furi_hal_power_is_otg_enabled() && attempts++ < 5) {
         furi_hal_power_enable_otg();
@@ -25,8 +26,8 @@ static void radio_device_loader_power_on(void) {
 static void radio_device_loader_power_off(void) {
     if(radio_device_loader_otg_enabled_by_loader && furi_hal_power_is_otg_enabled()) {
         furi_hal_power_disable_otg();
-        radio_device_loader_otg_enabled_by_loader = false;
     }
+    radio_device_loader_otg_enabled_by_loader = false;
 }
 
 bool radio_device_loader_is_connect_external(const char* name) {
@@ -115,6 +116,7 @@ const SubGhzDevice* radio_device_loader_set(
     }
 
     if(target_radio_device != subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME)) {
+        radio_device_loader_power_on();
         if(!subghz_devices_begin(target_radio_device)) {
             FURI_LOG_E(TAG, "External radio begin failed");
             radio_device_loader_end(target_radio_device);
@@ -130,6 +132,6 @@ void radio_device_loader_end(const SubGhzDevice* radio_device) {
 
     if(radio_device != subghz_devices_get_by_name(SUBGHZ_DEVICE_CC1101_INT_NAME)) {
         subghz_devices_end(radio_device);
+        radio_device_loader_power_off();
     }
-    radio_device_loader_power_off();
 }

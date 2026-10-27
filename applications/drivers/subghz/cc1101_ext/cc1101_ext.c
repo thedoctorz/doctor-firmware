@@ -954,14 +954,12 @@ bool subghz_device_cc1101_ext_hop_goto(uint32_t frequency, const uint8_t* preset
         }
 
         if(cached) {
-            if(retune) {
-                cc1101_write_reg(
-                    subghz_device_cc1101_ext->spi_bus_handle, CC1101_FSCAL3, cached->fscal3);
-                cc1101_write_reg(
-                    subghz_device_cc1101_ext->spi_bus_handle, CC1101_FSCAL2, cached->fscal2);
-                cc1101_write_reg(
-                    subghz_device_cc1101_ext->spi_bus_handle, CC1101_FSCAL1, cached->fscal1);
-            }
+            cc1101_write_reg(
+                subghz_device_cc1101_ext->spi_bus_handle, CC1101_FSCAL3, cached->fscal3);
+            cc1101_write_reg(
+                subghz_device_cc1101_ext->spi_bus_handle, CC1101_FSCAL2, cached->fscal2);
+            cc1101_write_reg(
+                subghz_device_cc1101_ext->spi_bus_handle, CC1101_FSCAL1, cached->fscal1);
         } else {
             ok = subghz_device_cc1101_ext_hop_calibrate(frequency, &target);
         }

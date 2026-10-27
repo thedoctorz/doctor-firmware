@@ -866,11 +866,9 @@ bool furi_hal_subghz_hop_goto(uint32_t frequency, const uint8_t* preset_data) {
         }
 
         if(cached) {
-            if(retune) {
-                cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL3, cached->fscal3);
-                cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL2, cached->fscal2);
-                cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL1, cached->fscal1);
-            }
+            cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL3, cached->fscal3);
+            cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL2, cached->fscal2);
+            cc1101_write_reg(&furi_hal_spi_bus_handle_subghz, CC1101_FSCAL1, cached->fscal1);
         } else {
             ok = furi_hal_subghz_hop_calibrate(frequency, &target);
         }
