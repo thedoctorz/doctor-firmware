@@ -5,6 +5,7 @@
 #include <assets_icons.h>
 #include <furi.h>
 #include <input/input.h>
+#include <stdio.h>
 
 #include "../updater_i.h"
 #include "updater_main.h"
@@ -34,6 +35,7 @@ void updater_main_model_set_state(
         main_view->view,
         UpdaterProgressModel * model,
         {
+            update = model->failed != failed;
             model->failed = failed;
             model->progress = progress;
             if(furi_string_cmp_str(model->status, message)) {
@@ -93,12 +95,54 @@ static void updater_main_draw_callback(Canvas* canvas, void* _model) {
         canvas_draw_icon(canvas, 7, 54, &I_Ok_btn_9x9);
         canvas_draw_icon(canvas, 75, 55, &I_Pin_back_arrow_10x8);
     } else {
-        canvas_draw_str_aligned(canvas, 55, 14, AlignLeft, AlignTop, "UPDATING");
+        canvas_draw_icon(canvas, 0, 0, &I_DoctorUpdater_56x64);
+        canvas_draw_str_aligned(canvas, 92, 2, AlignCenter, AlignTop, "UPDATING");
+
+        char percentage[5];
+        const uint8_t progress = MIN(model->progress, 100);
+        snprintf(percentage, sizeof(percentage), "%u%%", (unsigned int)progress);
+        canvas_draw_str_aligned(canvas, 92, 13, AlignCenter, AlignTop, percentage);
+        elements_progress_bar(canvas, 58, 23, 68, (float)progress / 100);
+
         canvas_set_font(canvas, FontSecondary);
-        canvas_draw_str_aligned(
-            canvas, 64, 51, AlignCenter, AlignTop, furi_string_get_cstr(model->status));
-        canvas_draw_icon(canvas, 4, 5, &I_Updating_32x40);
-        elements_progress_bar(canvas, 42, 29, 80, (float)model->progress / 100);
+        char status[64];
+        snprintf(status, sizeof(status), "%s", furi_string_get_cstr(model->status));
+
+        // Greedy word wrap so every status line fits the box width.
+        const size_t status_box_width = 68;
+        char* line_start = status;
+        char* last_space = NULL;
+        size_t line_width = 0;
+        for(char* cursor = status; *cursor; ++cursor) {
+            if(*cursor == '\n') {
+                line_start = cursor + 1;
+                last_space = NULL;
+                line_width = 0;
+                continue;
+            }
+            if(*cursor == ' ') last_space = cursor;
+            line_width += canvas_glyph_width(canvas, *cursor);
+            if(line_width > status_box_width && last_space && last_space != line_start) {
+                *last_space = '\n';
+                line_start = last_space + 1;
+                last_space = NULL;
+                line_width = 0;
+                for(const char* c = line_start; c <= cursor; ++c) {
+                    line_width += canvas_glyph_width(canvas, *c);
+                }
+            }
+        }
+
+        elements_text_box(
+            canvas,
+            58,
+            33,
+            status_box_width,
+            31,
+            AlignCenter,
+            AlignCenter,
+            status,
+            true);
     }
 }
 

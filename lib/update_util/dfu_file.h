@@ -37,4 +37,11 @@ bool dfu_file_validate_crc(File* dfuf, const DfuPageTaskProgressCb progress_cb, 
  */
 uint8_t dfu_file_validate_headers(File* dfuf, const DfuValidationParams* reference_params);
 
+/* Check every element before writing, with an exclusive upper flash boundary. */
+bool dfu_file_validate_targets(
+    File* dfuf,
+    uint8_t n_targets,
+    size_t min_address,
+    size_t end_address);
+
 bool dfu_file_process_targets(const DfuUpdateTask* task, File* dfuf, const uint8_t n_targets);

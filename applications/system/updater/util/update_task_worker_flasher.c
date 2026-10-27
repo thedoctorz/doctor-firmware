@@ -50,11 +50,13 @@ static bool update_task_flash_program_page(
     const uint8_t i_page,
     const uint8_t* update_block,
     uint16_t update_block_len) {
-    furi_hal_flash_program_page(i_page, update_block, update_block_len);
+    if(!page_task_compare_flash(i_page, update_block, update_block_len)) {
+        furi_hal_flash_program_page(i_page, update_block, update_block_len);
+    }
     return true;
 }
 
-static bool update_task_write_dfu(UpdateTask* update_task) {
+static bool update_task_write_dfu(UpdateTask* update_task, size_t end_address) {
     DfuUpdateTask page_task = {
         .address_cb = &check_address_boundaries,
         .progress_cb = &update_task_file_progress,
@@ -75,6 +77,9 @@ static bool update_task_write_dfu(UpdateTask* update_task) {
         if(valid_targets == 0) {
             break;
         }
+
+        CHECK_RESULT(dfu_file_validate_targets(
+            update_task->file, valid_targets, furi_hal_flash_get_base(), end_address));
 
         update_task_set_progress(update_task, UpdateTaskStageFlashWrite, 0);
         CHECK_RESULT(dfu_file_process_targets(&page_task, update_task->file, valid_targets));
@@ -145,6 +150,13 @@ static bool update_task_write_stack(UpdateTask* update_task) {
         CHECK_RESULT(
             crc32_calc_file(update_task->file, &update_task_file_progress, update_task) ==
             manifest->radio_crc);
+
+        if(update_task->state.groups & UpdateTaskStageGroupFirmware) {
+            const size_t flash_end = (size_t)furi_hal_flash_get_free_end_address();
+            CHECK_RESULT(update_task_write_dfu(
+                update_task, MIN(flash_end, (size_t)manifest->radio_address)));
+            CHECK_RESULT(update_task_open_file(update_task, manifest->radio_image));
+        }
 
         CHECK_RESULT(update_task_write_stack_data(update_task));
         update_task_set_progress(update_task, UpdateTaskStageRadioInstall, 10);
@@ -337,7 +349,8 @@ int32_t update_task_worker_flash_writer(void* context) {
         }
 
         if(update_task->state.groups & UpdateTaskStageGroupFirmware) {
-            CHECK_RESULT(update_task_write_dfu(update_task));
+            CHECK_RESULT(update_task_write_dfu(
+                update_task, (size_t)furi_hal_flash_get_free_end_address()));
         }
 
         furi_hal_rtc_set_boot_mode(FuriHalRtcBootModePostUpdate);

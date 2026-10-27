@@ -66,6 +66,41 @@ uint8_t dfu_file_validate_headers(File* dfuf, const DfuValidationParams* referen
     return dfu_prefix.bTargets;
 }
 
+bool dfu_file_validate_targets(
+    File* dfuf,
+    uint8_t n_targets,
+    size_t min_address,
+    size_t end_address) {
+    const size_t page_size = furi_hal_flash_get_page_size();
+    const uint64_t file_size = storage_file_size(dfuf);
+    if(!n_targets || min_address >= end_address || file_size < sizeof(DfuSuffix) ||
+       !storage_file_seek(dfuf, sizeof(DfuPrefix), true)) {
+        return false;
+    }
+
+    const uint64_t image_end = file_size - sizeof(DfuSuffix);
+    for(uint8_t i = 0; i < n_targets; ++i) {
+        TargetPrefix target;
+        if(storage_file_read(dfuf, &target, sizeof(target)) != sizeof(target) ||
+           !target.dwNbElements) {
+            return false;
+        }
+        for(uint32_t j = 0; j < target.dwNbElements; ++j) {
+            ImageElementHeader element;
+            if(storage_file_read(dfuf, &element, sizeof(element)) != sizeof(element) ||
+               !element.dwElementSize || element.dwElementAddress % page_size ||
+               element.dwElementAddress < min_address ||
+               element.dwElementAddress >= end_address ||
+               element.dwElementSize > end_address - element.dwElementAddress ||
+               (uint64_t)storage_file_tell(dfuf) + element.dwElementSize > image_end ||
+               !storage_file_seek(dfuf, element.dwElementSize, false)) {
+                return false;
+            }
+        }
+    }
+    return storage_file_tell(dfuf) == image_end;
+}
+
 /* Assumes file is open, valid and read pointer is set at the start of image data
  */
 static DfuUpdateBlockResult dfu_file_perform_task_for_update_pages(
@@ -77,16 +112,16 @@ static DfuUpdateBlockResult dfu_file_perform_task_for_update_pages(
     task->progress_cb(0, task->context);
     const size_t FLASH_PAGE_SIZE = furi_hal_flash_get_page_size();
     const size_t FLASH_PAGE_ALIGNMENT_MASK = FLASH_PAGE_SIZE - 1;
-    if((header->dwElementAddress & FLASH_PAGE_ALIGNMENT_MASK) != 0) {
+    if((header->dwElementAddress & FLASH_PAGE_ALIGNMENT_MASK) != 0 ||
+       !header->dwElementSize ||
+       header->dwElementSize - 1 > UINT32_MAX - header->dwElementAddress) {
         /* start address is not aligned by page boundary -- we don't support that. Yet. */
         return UpdateBlockResult_Failed;
     }
 
     if(task->address_cb && (!task->address_cb(header->dwElementAddress) ||
-                            !task->address_cb(header->dwElementAddress + header->dwElementSize))) {
-        storage_file_seek(dfuf, header->dwElementSize, false);
-        task->progress_cb(100, task->context);
-        return UpdateBlockResult_Skipped;
+                            !task->address_cb(header->dwElementAddress + header->dwElementSize - 1))) {
+        return UpdateBlockResult_Failed;
     }
 
     uint8_t* fw_block = malloc(FLASH_PAGE_SIZE);
@@ -128,20 +163,20 @@ bool dfu_file_process_targets(const DfuUpdateTask* task, File* dfuf, const uint8
     size_t bytes_read = 0;
 
     if(!storage_file_seek(dfuf, sizeof(DfuPrefix), true)) {
-        return UpdateBlockResult_Failed;
+        return false;
     };
 
     for(uint8_t i_target = 0; i_target < n_targets; ++i_target) {
         bytes_read = storage_file_read(dfuf, &target_prefix, sizeof(TargetPrefix));
         if(bytes_read != sizeof(TargetPrefix)) {
-            return UpdateBlockResult_Failed;
+            return false;
         }
 
         /* TODO FL-3562: look into TargetPrefix and validate/filter?.. */
         for(uint32_t i_element = 0; i_element < target_prefix.dwNbElements; ++i_element) {
             bytes_read = storage_file_read(dfuf, &image_element, sizeof(ImageElementHeader));
             if(bytes_read != sizeof(ImageElementHeader)) {
-                return UpdateBlockResult_Failed;
+                return false;
             }
 
             if(dfu_file_perform_task_for_update_pages(task, dfuf, &image_element) ==
