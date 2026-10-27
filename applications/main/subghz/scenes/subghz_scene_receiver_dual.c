@@ -58,6 +58,7 @@ void subghz_scene_receiver_dual_callback(SubGhzCustomEvent event, void* context)
 
 static void
     subghz_scene_receiver_dual_log_frame(SubGhzProtocolDecoderBase* decoder_base, uint8_t source) {
+    UNUSED(source);
     if(furi_log_get_level() < FuriLogLevelDebug) return;
 
     FuriString* text = furi_string_alloc();
