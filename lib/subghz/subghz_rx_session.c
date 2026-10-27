@@ -105,6 +105,7 @@ struct SubGhzRxSession {
 
     bool tx_active;
     volatile bool pairs_overrun;
+    volatile uint32_t pairs_overrun_count;
 };
 
 static int8_t subghz_rx_session_clamp_dbm(float rssi) {
@@ -217,14 +218,27 @@ static SubGhzProtocolFlag subghz_rx_session_modulation_mask(const uint8_t* prese
 }
 
 static SubGhzProtocolFlag subghz_rx_session_band_flag(uint32_t frequency) {
-    if(frequency >= 280000000UL && frequency <= 350000000UL) return SubGhzProtocolFlag_315;
-    if(frequency >= 380000000UL && frequency <= 480000000UL) return SubGhzProtocolFlag_433;
+    if(frequency >= 280000000UL && frequency <= 480000000UL)
+        return SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433;
     if(frequency >= 750000000UL && frequency <= 950000000UL) return SubGhzProtocolFlag_868;
     return SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_868;
 }
 
+static bool subghz_rx_session_preset_is_heavy(const uint8_t* preset_data) {
+    if(!preset_data) return false;
+    for(size_t i = 0; preset_data[i]; i += 2) {
+        if(preset_data[i] == CC1101_MDMCFG2) {
+            return ((preset_data[i + 1] >> 4) & 0x07) != 3; // non-OOK => FSK => heavy
+        }
+    }
+    return false;
+}
+
 static SubGhzProtocolFlag
     subghz_rx_session_gate_mask(uint32_t frequency, const uint8_t* preset_data) {
+    if(!subghz_rx_session_preset_is_heavy(preset_data))
+        return SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM | SubGhzProtocolFlag_315 |
+               SubGhzProtocolFlag_433 | SubGhzProtocolFlag_868;
     return subghz_rx_session_modulation_mask(preset_data) | subghz_rx_session_band_flag(frequency);
 }
 
@@ -270,15 +284,20 @@ static void subghz_rx_session_rx_begin(SubGhzRxSession* instance, uint32_t frequ
     subghz_receiver_reset(instance->receiver);
     furi_stream_buffer_reset(instance->pairs);
     instance->pairs_overrun = false;
-    subghz_devices_start_async_rx(instance->device, subghz_worker_rx_callback, instance->worker);
+    instance->pairs_overrun_count = 0;
+    subghz_worker_set_priority(
+        instance->worker,
+        subghz_rx_session_preset_is_heavy(instance->preset.data) ? FuriThreadPriorityNormal :
+                                                                   FuriThreadPriorityHigh);
     subghz_worker_start(instance->worker);
+    subghz_devices_start_async_rx(instance->device, subghz_worker_rx_callback, instance->worker);
     instance->rx_running = true;
 }
 
 static void subghz_rx_session_rx_end(SubGhzRxSession* instance) {
     if(!instance->rx_running) return;
-    if(subghz_worker_is_running(instance->worker)) subghz_worker_stop(instance->worker);
     subghz_devices_stop_async_rx(instance->device);
+    if(subghz_worker_is_running(instance->worker)) subghz_worker_stop(instance->worker);
     if(instance->speaker_acquired) {
         subghz_devices_set_async_mirror_pin(instance->device, NULL);
     }
@@ -344,6 +363,7 @@ static void subghz_rx_session_overrun_callback(void* context) {
     const SubGhzRxPair reset = level_duration_reset();
     if(furi_stream_buffer_send(instance->pairs, &reset, sizeof(reset), 0) != sizeof(reset)) {
         instance->pairs_overrun = true;
+        instance->pairs_overrun_count++;
     }
 }
 
@@ -357,6 +377,7 @@ static void subghz_rx_session_pair_callback(void* context, bool level, uint32_t 
     }
     if(furi_stream_buffer_send(instance->pairs, &pair, sizeof(pair), 0) != sizeof(pair)) {
         instance->pairs_overrun = true;
+        instance->pairs_overrun_count++;
     }
 }
 
@@ -443,6 +464,8 @@ static int32_t subghz_rx_session_pump(void* context) {
 
     uint32_t rssi_stamp = furi_get_tick();
     uint32_t flush_stamp = rssi_stamp;
+    uint32_t overrun_stamp = rssi_stamp;
+    uint32_t reported_overruns = 0;
 
     while(true) {
         if(instance->pause_request) {
@@ -475,6 +498,12 @@ static int32_t subghz_rx_session_pump(void* context) {
         if(drained >= SUBGHZ_RX_PAIRS_PER_PASS) furi_thread_yield();
 
         const uint32_t now = furi_get_tick();
+        if(instance->pairs_overrun_count != reported_overruns &&
+           now - overrun_stamp >= furi_ms_to_ticks(1000)) {
+            overrun_stamp = now;
+            reported_overruns = instance->pairs_overrun_count;
+            FURI_LOG_W(TAG, "Decode queue drops: %lu", reported_overruns);
+        }
 
         if(!instance->tx_active &&
            now - rssi_stamp >= furi_ms_to_ticks(instance->rssi_interval_ms)) {

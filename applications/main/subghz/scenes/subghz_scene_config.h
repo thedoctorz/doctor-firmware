@@ -1,5 +1,6 @@
 ADD_SCENE(subghz, start, Start)
 ADD_SCENE(subghz, receiver, Receiver)
+ADD_SCENE(subghz, raw_rx_tx, RawRxTx)
 ADD_SCENE(subghz, receiver_config, ReceiverConfig)
 ADD_SCENE(subghz, receiver_dual, ReceiverDual)
 ADD_SCENE(subghz, receiver_dual_config, ReceiverDualConfig)

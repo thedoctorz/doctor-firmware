@@ -1,3 +1,4 @@
+#include <lib/subghz/subghz_dual_radio_view.h>
 #include "receiver.h"
 #include "../subghz_i.h"
 
@@ -95,6 +96,9 @@ typedef struct {
 
     bool nodraw;
 
+    bool raw_rx_tx;
+    bool raw_transmitting;
+    char raw_filename[64];
     bool dual_mode;
     bool dual_dashboard;
     FuriString* dual_int_str;
@@ -494,62 +498,35 @@ bool subghz_view_receiver_get_dual_dashboard(SubGhzViewReceiver* subghz_receiver
     return dashboard;
 }
 
-static void subghz_view_receiver_draw_wave_section(
-    Canvas* canvas,
-    const uint8_t* history,
-    uint8_t history_index,
-    uint8_t baseline,
-    uint8_t region_height) {
-    for(uint8_t col = 0; col < SUBGHZ_RX_RSSI_HISTORY_SIZE; col++) {
-        uint8_t idx = (history_index + col) % SUBGHZ_RX_RSSI_HISTORY_SIZE;
-        uint16_t bar = (uint16_t)history[idx] * region_height / SUBGHZ_RX_RSSI_WAVEFORM_HEIGHT;
-        if(bar < 1) bar = 1;
-        if(bar > region_height) bar = region_height;
-        canvas_draw_line(canvas, col, baseline, col, (uint8_t)(baseline - bar + 1));
-    }
-}
-
-static void subghz_view_receiver_draw_dual_pane(
-    Canvas* canvas,
-    const char* marker,
-    const char* info,
-    const uint8_t* history,
-    uint8_t history_index,
-    uint8_t top) {
-    const uint8_t height = 31;
-    const uint8_t bottom = top + height - 1;
-    char label[48];
-    snprintf(label, sizeof(label), "[%s] %s", marker, info);
-
-    canvas_set_color(canvas, ColorBlack);
-    subghz_view_receiver_draw_wave_section(
-        canvas, history, history_index, bottom - 1, height - 14);
-    canvas_draw_frame(canvas, 0, top, 128, height);
-    canvas_draw_str(canvas, 4, top + 9, label);
-}
-
 static void
     subghz_view_receiver_draw_dual_dashboard(Canvas* canvas, SubGhzViewReceiverModel* model) {
     canvas_set_font(canvas, FontSecondary);
-    subghz_view_receiver_draw_dual_pane(
+    const char* count = furi_string_get_cstr(model->history_stat_str);
+    // The full list warning does not fit beside a radio label on the split dashboard.
+    if(strstr(count, "RAM")) {
+        count = "RAM!";
+    } else if(strstr(count, "FULL")) {
+        count = "FULL";
+    }
+    const uint8_t count_width = canvas_string_width(canvas, count);
+    subghz_dual_radio_draw_pane(
         canvas,
         "I",
         furi_string_get_cstr(model->dual_int_str),
         model->rssi_history,
         model->rssi_history_index,
-        0);
-    subghz_view_receiver_draw_dual_pane(
+        0,
+        116 - MIN(count_width, 112));
+    subghz_dual_radio_draw_pane(
         canvas,
         "E",
         furi_string_get_cstr(model->dual_ext_str),
         model->rssi_history_ext,
         model->rssi_history_ext_index,
-        33);
-
-    const char* count = furi_string_get_cstr(model->history_stat_str);
+        33,
+        120);
     if(count[0] != '\0') {
-        uint8_t w = canvas_string_width(canvas, count);
-        canvas_draw_str(canvas, 124 - w, 9, count);
+        canvas_draw_str(canvas, 124 - count_width, 9, count);
     }
 }
 
@@ -588,10 +565,51 @@ static void subghz_view_rssi_waveform_draw(Canvas* canvas, SubGhzViewReceiverMod
     }
 }
 
+void subghz_view_receiver_set_raw_rx_tx(
+    SubGhzViewReceiver* receiver,
+    bool enabled,
+    bool transmitting,
+    const char* filename) {
+    with_view_model(
+        receiver->view,
+        SubGhzViewReceiverModel * model,
+        {
+            model->raw_rx_tx = enabled;
+            model->raw_transmitting = transmitting;
+            snprintf(
+                model->raw_filename, sizeof(model->raw_filename), "%s", filename ? filename : "");
+        },
+        true);
+}
+
 void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
     canvas_clear(canvas);
     canvas_set_color(canvas, ColorBlack);
     canvas_set_font(canvas, FontSecondary);
+
+    if(model->raw_rx_tx) {
+        subghz_view_receiver_draw_read_freq(
+            canvas, furi_string_get_cstr(model->frequency_str), model->raw_transmitting);
+        canvas_draw_line(canvas, 0, 19, 127, 19);
+        if(model->raw_transmitting) {
+            canvas_set_font(canvas, FontPrimary);
+            canvas_draw_str_aligned(canvas, 64, 33, AlignCenter, AlignCenter, "Jamming...");
+            canvas_set_font(canvas, FontSecondary);
+            FuriString* filename = furi_string_alloc_set(model->raw_filename);
+            elements_string_fit_width(canvas, filename, 122);
+            canvas_draw_str_aligned(
+                canvas, 64, 46, AlignCenter, AlignCenter, furi_string_get_cstr(filename));
+            furi_string_free(filename);
+        } else {
+            subghz_dual_radio_draw_wave(
+                canvas, model->rssi_history, model->rssi_history_index, 49, 27);
+        }
+        subghz_view_receiver_draw_antenna_icon(canvas, model);
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str(canvas, 3, 62, furi_string_get_cstr(model->preset_str));
+        elements_button_center(canvas, model->raw_transmitting ? "Stop" : "JAM!");
+        return;
+    }
 
     if(model->dual_mode && model->dual_dashboard) {
         subghz_view_receiver_draw_dual_dashboard(canvas, model);
@@ -655,7 +673,7 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
 
     if(model->history_item == 0) {
         if(model->mode == SubGhzViewReceiverModeLive) {
-            subghz_view_receiver_draw_wave_section(
+            subghz_dual_radio_draw_wave(
                 canvas, model->rssi_history, model->rssi_history_index, 49, 27);
             canvas_draw_line(canvas, 0, 19, 127, 19);
 
@@ -807,6 +825,35 @@ bool subghz_view_receiver_input(InputEvent* event, void* context) {
     }
 
     const uint32_t now = furi_get_tick();
+
+    bool raw_rx_tx = false;
+    bool raw_transmitting = false;
+    with_view_model(
+        subghz_receiver->view,
+        SubGhzViewReceiverModel * model,
+        {
+            raw_rx_tx = model->raw_rx_tx;
+            raw_transmitting = model->raw_transmitting;
+        },
+        false);
+    if(raw_rx_tx) {
+        if(event->type == InputTypeShort || event->type == InputTypeRepeat) {
+            SubGhzCustomEvent action;
+            if(event->key == InputKeyBack && event->type == InputTypeShort) {
+                action = SubGhzCustomEventViewReceiverBack;
+            } else if(event->key == InputKeyOk && event->type == InputTypeShort) {
+                action = SubGhzCustomEventViewReceiverConfig;
+            } else if(!raw_transmitting && event->key == InputKeyLeft) {
+                action = SubGhzCustomEventViewReceiverPrevFrequency;
+            } else if(!raw_transmitting && event->key == InputKeyRight) {
+                action = SubGhzCustomEventViewReceiverNextFrequency;
+            } else {
+                return true;
+            }
+            subghz_receiver->callback(action, subghz_receiver->context);
+        }
+        return true;
+    }
 
     bool dual_dashboard = false;
     with_view_model(
@@ -981,6 +1028,8 @@ void subghz_view_receiver_exit(void* context) {
                 model->nodraw = false;
                 model->hopping_enabled = false;
                 model->bin_raw_enabled = false;
+                model->raw_rx_tx = false;
+                model->raw_transmitting = false;
                 model->dual_mode = false;
                 model->dual_dashboard = true;
                 furi_string_reset(model->dual_int_str);

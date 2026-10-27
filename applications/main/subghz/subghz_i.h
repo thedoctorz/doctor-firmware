@@ -78,6 +78,7 @@ struct SubGhz {
     VariableItemList* variable_item_list;
 
     SubGhzReadRAW* subghz_read_raw;
+    void* raw_rx_tx;
     bool raw_send_only;
     bool raw_auto_locked;
 

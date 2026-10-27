@@ -24,6 +24,8 @@ struct SubGhzTxRx {
     FlipperFormat* fff_data;
 
     SubGhzRadioPreset* preset;
+    SubGhzRadioPreset rx_preset;
+    uint8_t rx_preset_data[SUBGHZ_SETTING_MAX_PRESET_DATA_SIZE];
     SubGhzSetting* setting;
 
     uint8_t hopper_timeout;

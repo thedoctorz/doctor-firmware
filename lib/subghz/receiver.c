@@ -130,7 +130,14 @@ void subghz_receiver_reset(SubGhzReceiver* instance) {
 static void subghz_receiver_rx_callback(SubGhzProtocolDecoderBase* decoder_base, void* context) {
     SubGhzReceiver* instance = context;
     if(instance->callback) {
+        const FuriThreadPriority priority = furi_thread_get_current_priority();
+        if(priority > FuriThreadPriorityNormal) {
+            furi_thread_set_current_priority(FuriThreadPriorityNormal);
+        }
         instance->callback(instance, decoder_base, instance->context);
+        if(priority > FuriThreadPriorityNormal) {
+            furi_thread_set_current_priority(priority);
+        }
     }
 }
 

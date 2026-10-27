@@ -10,7 +10,6 @@ App(
         "u2f",
         "infrared",
         "subghz_bruteforcer",
-        "jammer_app",
         "usb_msc",
         "subghz_analyzer",
         "nfc_sniffer",

@@ -1,4 +1,4 @@
-#include "subghz_file_encoder_worker.h"
+#include "subghz_file_encoder_worker_i.h"
 
 #include <toolbox/stream/stream.h>
 #include <flipper_format/flipper_format.h>
@@ -23,6 +23,7 @@ struct SubGhzFileEncoderWorker {
     volatile bool worker_stopping;
     bool is_storage_slow;
     bool is_decoding;
+    bool loop;
     FuriString* str_data;
     FuriString* file_path;
     const SubGhzDevice* device;
@@ -61,7 +62,8 @@ bool subghz_file_encoder_worker_data_parse(SubGhzFileEncoderWorker* instance, co
 
         // Parse next element
         int32_t duration;
-        while(strint_to_int32(str, &str, &duration, 10) == StrintParseNoError) {
+        while(instance->worker_running &&
+              strint_to_int32(str, &str, &duration, 10) == StrintParseNoError) {
             if((duration < -SUBGHZ_FILE_ENCODER_DURATION_MAX) ||
                (duration > SUBGHZ_FILE_ENCODER_DURATION_MAX)) {
                 int32_t clamped = instance->is_decoding ? SUBGHZ_FILE_ENCODER_DURATION_MAX : 100;
@@ -71,10 +73,9 @@ bool subghz_file_encoder_worker_data_parse(SubGhzFileEncoderWorker* instance, co
             } else {
                 subghz_file_encoder_worker_add_level_duration(instance, duration);
             }
+            res = true;
             if(*str == ',') str++; // could also be `\0`
         }
-
-        res = true;
     }
 
     return res;
@@ -147,6 +148,9 @@ static int32_t subghz_file_encoder_worker_thread(void* context) {
         FURI_LOG_I(TAG, "Start transmission");
     } while(0);
 
+    if(!res) subghz_file_encoder_worker_add_level_duration(instance, LEVEL_DURATION_RESET);
+    const size_t data_start = stream_tell(stream);
+    bool pass_has_data = false;
     while(res && instance->worker_running) {
         size_t stream_free_byte = furi_stream_buffer_spaces_available(instance->stream);
         if((stream_free_byte / sizeof(int32_t)) >= SUBGHZ_FILE_ENCODER_LOAD) {
@@ -157,7 +161,13 @@ static int32_t subghz_file_encoder_worker_thread(void* context) {
                     subghz_file_encoder_worker_add_level_duration(instance, LEVEL_DURATION_RESET);
                     break;
                 }
+                pass_has_data = true;
             } else {
+                if(instance->loop && pass_has_data &&
+                   stream_seek(stream, data_start, StreamOffsetFromStart)) {
+                    pass_has_data = false;
+                    continue;
+                }
                 subghz_file_encoder_worker_add_level_duration(instance, LEVEL_DURATION_RESET);
                 break;
             }
@@ -203,6 +213,7 @@ SubGhzFileEncoderWorker* subghz_file_encoder_worker_alloc(void) {
     instance->file_path = furi_string_alloc();
     instance->worker_stopping = true;
     instance->is_decoding = false;
+    instance->loop = false;
 
     return instance;
 }
@@ -220,6 +231,11 @@ void subghz_file_encoder_worker_free(SubGhzFileEncoderWorker* instance) {
     furi_record_close(RECORD_STORAGE);
 
     free(instance);
+}
+
+void subghz_file_encoder_worker_set_loop(SubGhzFileEncoderWorker* instance, bool loop) {
+    furi_check(!instance->worker_running);
+    instance->loop = loop;
 }
 
 bool subghz_file_encoder_worker_start(

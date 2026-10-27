@@ -118,6 +118,7 @@ static void subghz_load_custom_presets(SubGhzSetting* setting) {
 
 SubGhz* subghz_alloc(bool alloc_for_tx_only) {
     SubGhz* subghz = malloc(sizeof(SubGhz));
+    subghz->raw_rx_tx = NULL;
 
     subghz->file_path = furi_string_alloc();
     subghz->file_path_tmp = furi_string_alloc();
@@ -296,6 +297,8 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         subghz->rpc_ctx = NULL;
     }
 
+    if(subghz->raw_rx_tx) subghz_scene_raw_rx_tx_on_exit(subghz);
+
     subghz_txrx_speaker_off(subghz->txrx);
     subghz_txrx_stop(subghz->txrx);
     subghz_txrx_sleep(subghz->txrx);
@@ -391,6 +394,7 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
 int32_t subghz_app(void* p) {
     const char* args = (const char*)p;
     bool start_analyzer = (args != NULL) && (strcmp(args, "analyzer") == 0);
+    const bool start_dual_receiver = (args != NULL) && (strcmp(args, "dual_rx") == 0);
 
     uint32_t start_rx_frequency = 0;
     bool start_receiver = (args != NULL) && (sscanf(args, "rx %lu", &start_rx_frequency) == 1) &&
@@ -411,7 +415,8 @@ int32_t subghz_app(void* p) {
     const bool start_read_raw = start_raw_frequency > 0;
 
     bool alloc_for_tx;
-    if(args && strlen(args) && !start_analyzer && !start_receiver && !start_read_raw) {
+    if(args && strlen(args) && !start_analyzer && !start_receiver && !start_read_raw &&
+       !start_dual_receiver) {
         alloc_for_tx = true;
     } else {
         alloc_for_tx = false;
@@ -426,7 +431,13 @@ int32_t subghz_app(void* p) {
     }
 
     // Check argument and run corresponding scene
-    if(start_analyzer) {
+    if(start_dual_receiver) {
+        view_dispatcher_attach_to_gui(
+            subghz->view_dispatcher, subghz->gui, ViewDispatcherTypeFullscreen);
+        furi_string_set(subghz->file_path, SUBGHZ_APP_FOLDER);
+        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneStart);
+        scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReceiverDual);
+    } else if(start_analyzer) {
         view_dispatcher_attach_to_gui(
             subghz->view_dispatcher, subghz->gui, ViewDispatcherTypeFullscreen);
         furi_string_set(subghz->file_path, SUBGHZ_APP_FOLDER);

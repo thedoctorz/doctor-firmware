@@ -263,8 +263,8 @@ static bool nice_o_rx_start(NiceOCode* app) {
     subghz_worker_set_pair_callback(app->worker, (SubGhzWorkerPairCallback)subghz_receiver_decode);
     subghz_worker_set_context(app->worker, app->receiver);
 
-    subghz_devices_start_async_rx(app->device, subghz_worker_rx_callback, app->worker);
     subghz_worker_start(app->worker);
+    subghz_devices_start_async_rx(app->device, subghz_worker_rx_callback, app->worker);
     subghz_devices_set_rx(app->device);
     app->rx_active = true;
     return true;

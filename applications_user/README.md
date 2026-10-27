@@ -10,7 +10,6 @@ Bundled apps shipped with The Doctor's Firmware (Sub-GHz focused).
 | `spectrum_analyzer` | Spectrogram | Apps → Sub-GHz |
 | `subghz_bruteforcer` | Static-code brute-force | Main menu |
 | `subghz_raw_edit` | Trim RAW `.sub` captures | Apps → Sub-GHz |
-| `jammer_app` | RF jammer (lab use only) | Main menu |
 | `nfc_sniffer` | ISO14443-A HF passive sniffer | Main menu |
 | `fw_updater` | Install firmware packages from the SD card | Main menu |
 | `usb_msc` | USB mass storage of the SD card | Apps → USB |

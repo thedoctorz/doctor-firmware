@@ -12,6 +12,7 @@
 #define SUBGHZ_LAST_SETTING_FIELD_FREQUENCY_ANALYZER_FEEDBACK_LEVEL "FeedbackLevel"
 #define SUBGHZ_LAST_SETTING_FIELD_FREQUENCY_ANALYZER_TRIGGER        "FATrigger"
 #define SUBGHZ_LAST_SETTING_FIELD_PROTOCOL_FILE_NAMES               "ProtocolNames"
+#define SUBGHZ_LAST_SETTING_FIELD_PROTOCOL_FOLDERS                  "ProtocolFolders"
 #define SUBGHZ_LAST_SETTING_FIELD_HOPPING_ENABLE                    "Hopping"
 #define SUBGHZ_LAST_SETTING_FIELD_IGNORE_FILTER                     "IgnoreFilter"
 #define SUBGHZ_LAST_SETTING_FIELD_FILTER                            "Filter"
@@ -55,6 +56,7 @@ void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count
     instance->hopping_mod_a = 1;
     instance->hopping_mod_b = 3;
     instance->leds_and_amp = true;
+    instance->protocol_folders = true;
     instance->autosave = false;
     instance->gps_companion = false;
     instance->read_raw_auto = false;
@@ -100,6 +102,13 @@ void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count
                    fff_data_file,
                    SUBGHZ_LAST_SETTING_FIELD_PROTOCOL_FILE_NAMES,
                    &instance->protocol_file_names,
+                   1)) {
+                flipper_format_rewind(fff_data_file);
+            }
+            if(!flipper_format_read_bool(
+                   fff_data_file,
+                   SUBGHZ_LAST_SETTING_FIELD_PROTOCOL_FOLDERS,
+                   &instance->protocol_folders,
                    1)) {
                 flipper_format_rewind(fff_data_file);
             }
@@ -256,6 +265,13 @@ bool subghz_last_settings_save(SubGhzLastSettings* instance) {
                file,
                SUBGHZ_LAST_SETTING_FIELD_PROTOCOL_FILE_NAMES,
                &instance->protocol_file_names,
+               1)) {
+            break;
+        }
+        if(!flipper_format_write_bool(
+               file,
+               SUBGHZ_LAST_SETTING_FIELD_PROTOCOL_FOLDERS,
+               &instance->protocol_folders,
                1)) {
             break;
         }

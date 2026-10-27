@@ -96,6 +96,8 @@ uint32_t subghz_worker_get_overrun_count(SubGhzWorker* instance);
  */
 void subghz_worker_set_filter(SubGhzWorker* instance, uint16_t timeout);
 
+void subghz_worker_set_priority(SubGhzWorker* instance, FuriThreadPriority priority);
+
 #ifdef __cplusplus
 }
 #endif

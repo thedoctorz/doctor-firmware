@@ -45,6 +45,7 @@ App(
         "subghz_cli.c",
         "helpers/subghz_chat.c",
     ],
+    fap_libs=["assets", "hwdrivers"],
 )
 
 App(

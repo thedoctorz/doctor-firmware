@@ -124,7 +124,6 @@ static void subghz_scene_receiver_schedule_tune(SubGhz* subghz, bool needs_prese
 
 static void subghz_scene_receiver_apply_pending_tune(SubGhz* subghz) {
     const bool reload_preset = subghz->receiver_tune_needs_preset_reload;
-    const bool dirty = subghz->receiver_settings_dirty;
 
     subghz->receiver_tune_debounce = 0;
     subghz->receiver_tune_needs_preset_reload = false;
@@ -134,11 +133,6 @@ static void subghz_scene_receiver_apply_pending_tune(SubGhz* subghz) {
         subghz_txrx_rx_start(subghz->txrx);
     } else {
         subghz_txrx_rx_retune(subghz->txrx, preset.frequency);
-    }
-
-    if(dirty) {
-        subghz_last_settings_save(subghz->last_settings);
-        subghz->receiver_settings_dirty = false;
     }
 
     subghz_scene_receiver_update_statusbar(subghz);
@@ -236,9 +230,6 @@ static void subghz_scene_log_decoder_frame(SubGhzProtocolDecoderBase* decoder_ba
 static void subghz_scene_receiver_autosave(SubGhz* subghz, uint16_t idx) {
     if(!subghz->last_settings->autosave) return;
 
-    FlipperFormat* raw = subghz_history_get_raw_data(subghz->history, idx);
-    if(!raw) return;
-
     const SubGhzProtocol* protocol = subghz_history_get_protocol(subghz->history, idx);
     if(protocol == NULL) return;
     if((protocol->flag & SubGhzProtocolFlag_Save) == 0) return;
@@ -255,8 +246,13 @@ static void subghz_scene_receiver_autosave(SubGhz* subghz, uint16_t idx) {
         furi_string_push_back(safe_proto, c);
     }
 
-    FuriString* folder = furi_string_alloc_printf(
-        "%s/%s", SUBGHZ_AUTOSAVE_FOLDER, furi_string_get_cstr(safe_proto));
+    FuriString* folder = furi_string_alloc();
+    if(subghz->last_settings->protocol_folders) {
+        furi_string_printf(
+            folder, "%s/%s", SUBGHZ_AUTOSAVE_FOLDER, furi_string_get_cstr(safe_proto));
+    } else {
+        furi_string_set(folder, SUBGHZ_AUTOSAVE_FOLDER);
+    }
 
     const char* prefix = subghz->last_settings->protocol_file_names ?
                              furi_string_get_cstr(safe_proto) :
@@ -294,8 +290,11 @@ static void subghz_scene_receiver_autosave(SubGhz* subghz, uint16_t idx) {
         furi_string_get_cstr(name),
         SUBGHZ_APP_FILENAME_EXTENSION);
 
-    // subghz_save_protocol_to_file creates the folder (incl. protocol subfolder) if needed
-    subghz_save_protocol_to_file(subghz, raw, furi_string_get_cstr(path));
+    FlipperFormat* raw = subghz_history_get_raw_data_copy(subghz->history, idx);
+    if(raw) {
+        subghz_save_protocol_to_file(subghz, raw, furi_string_get_cstr(path));
+        flipper_format_free(raw);
+    }
 
     furi_string_free(name);
     furi_string_free(path);
@@ -371,12 +370,7 @@ static void subghz_scene_add_to_history_callback(
     if((decoder_base->protocol->flag & subghz->ignore_filter) == 0) {
         SubGhzHistory* history = subghz->history;
 
-        FuriString* preset_name = furi_string_alloc();
-        subghz_txrx_hopper_lock(subghz->txrx);
-        SubGhzRadioPreset preset = subghz_txrx_get_preset(subghz->txrx);
-        furi_string_set(preset_name, preset.name);
-        preset.name = preset_name;
-        subghz_txrx_hopper_unlock(subghz->txrx);
+        SubGhzRadioPreset preset = subghz_txrx_get_rx_preset(subghz->txrx);
 
         float gps_lat = 0;
         float gps_lon = 0;
@@ -391,7 +385,6 @@ static void subghz_scene_add_to_history_callback(
         }
         subghz_txrx_hopper_note_decode(subghz->txrx);
         subghz_receiver_reset(receiver);
-        furi_string_free(preset_name);
     } else {
         FURI_LOG_D(TAG, "%s protocol ignored", decoder_base->protocol->name);
     }

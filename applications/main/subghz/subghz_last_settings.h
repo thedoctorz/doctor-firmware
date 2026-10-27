@@ -23,6 +23,7 @@ typedef struct {
     uint32_t frequency_analyzer_feedback_level;
     float frequency_analyzer_trigger;
     bool protocol_file_names;
+    bool protocol_folders;
     bool enable_hopping;
     uint32_t ignore_filter;
     uint32_t filter;

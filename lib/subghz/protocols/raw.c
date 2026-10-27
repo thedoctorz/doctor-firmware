@@ -1,6 +1,6 @@
 #include "raw.h"
 #include <lib/flipper_format/flipper_format.h>
-#include "../subghz_file_encoder_worker.h"
+#include "../subghz_file_encoder_worker_i.h"
 
 #include "../blocks/const.h"
 #include "../blocks/generic.h"
@@ -39,6 +39,7 @@ struct SubGhzProtocolEncoderRAW {
     SubGhzProtocolEncoderBase base;
 
     bool is_running;
+    bool loop;
     FuriString* file_name;
     FuriString* radio_device_name;
     SubGhzFileEncoderWorker* file_worker_encoder;
@@ -384,6 +385,7 @@ void* subghz_protocol_encoder_raw_alloc(SubGhzEnvironment* environment) {
     instance->file_name = furi_string_alloc();
     instance->radio_device_name = furi_string_alloc();
     instance->is_running = false;
+    instance->loop = false;
     return instance;
 }
 
@@ -423,6 +425,7 @@ static bool subghz_protocol_encoder_raw_worker_init(SubGhzProtocolEncoderRAW* in
     furi_check(!instance->file_worker_encoder);
 
     instance->file_worker_encoder = subghz_file_encoder_worker_alloc();
+    subghz_file_encoder_worker_set_loop(instance->file_worker_encoder, instance->loop);
     if(subghz_file_encoder_worker_start(
            instance->file_worker_encoder,
            furi_string_get_cstr(instance->file_name),
@@ -489,6 +492,10 @@ SubGhzProtocolStatus
             break;
         }
         furi_string_set(instance->radio_device_name, temp_str);
+
+        uint32_t loop = 0;
+        flipper_format_read_uint32(flipper_format, "Loop", &loop, 1);
+        instance->loop = loop != 0;
 
         if(!subghz_protocol_encoder_raw_worker_init(instance)) {
             res = SubGhzProtocolStatusErrorEncoderGetUpload;

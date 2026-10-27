@@ -78,7 +78,7 @@ void subghz_scene_save_name_on_enter(void* context) {
             name_generator_make_auto_datetime(file_name_buf, SUBGHZ_MAX_LEN_NAME, NULL, datetime);
         }
         furi_string_set(file_name, file_name_buf);
-        if(protocol_name != NULL && !is_manual_add) {
+        if(protocol_name != NULL && !is_manual_add && subghz->last_settings->protocol_folders) {
             subghz_scene_save_name_set_protocol_dir(subghz->file_path, protocol_name);
         } else {
             furi_string_set(subghz->file_path, SUBGHZ_APP_FOLDER);

@@ -87,6 +87,8 @@ const char* subghz_txrx_get_preset_name(SubGhzTxRx* instance, const char* preset
  */
 SubGhzRadioPreset subghz_txrx_get_preset(SubGhzTxRx* instance);
 
+SubGhzRadioPreset subghz_txrx_get_rx_preset(SubGhzTxRx* instance);
+
 /**
  * Get string frequency and modulation
  * 
@@ -115,6 +117,7 @@ SubGhzTxRxStartTxState subghz_txrx_tx_start(SubGhzTxRx* instance, FlipperFormat*
  * @param instance Pointer to a SubGhzTxRx
  */
 void subghz_txrx_rx_start(SubGhzTxRx* instance);
+void subghz_txrx_rssi_start(SubGhzTxRx* instance);
 
 void subghz_txrx_raw_si_gate_set(SubGhzTxRx* instance, bool on);
 
@@ -421,6 +424,8 @@ bool subghz_txrx_radio_device_is_frequency_valid(SubGhzTxRx* instance, uint32_t 
 
 bool subghz_txrx_preset_fits_radio(SubGhzTxRx* instance, size_t preset_idx);
 
+bool subghz_txrx_preset_fits_kind(SubGhzTxRx* instance, size_t preset_idx, bool si4463);
+
 uint8_t subghz_txrx_preset_make_valid(SubGhzTxRx* instance, uint8_t tx_power);
 
 #define SUBGHZ_TXRX_FALLBACK_FREQUENCY 433920000UL
@@ -510,6 +515,16 @@ bool subghz_txrx_dual_is_active(SubGhzTxRx* instance);
 /** @brief Whether an external CC1101 module is connected (probes hardware). */
 bool subghz_txrx_dual_is_ext_connected(SubGhzTxRx* instance);
 
+/** @brief Whether the connected external module is an SI4463. */
+bool subghz_txrx_dual_ext_is_si4463(SubGhzTxRx* instance);
+
+/**
+ * @brief Map each dual preset onto one that radio can load.
+ *        Internal stays on CC1101 presets. External uses SI4463 presets only
+ *        when ext_si4463 is true, same rule as single-radio Read.
+ */
+void subghz_txrx_dual_coerce_presets(SubGhzTxRx* instance, bool ext_si4463);
+
 /**
  * @brief Install per-radio decode callbacks for dual RX.
  * @param callback_int Called when the internal radio decodes a protocol.
@@ -560,3 +575,5 @@ bool subghz_txrx_save_raw_from_key(
 #ifdef __cplusplus
 }
 #endif
+
+bool subghz_txrx_dual_begin(SubGhzTxRx* instance);
