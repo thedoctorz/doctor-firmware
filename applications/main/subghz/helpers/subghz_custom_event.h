@@ -37,6 +37,7 @@ typedef enum {
     SubGhzCustomEventSceneSettingLock,
     SubGhzCustomEventSceneSettingResetToDefault,
     SubGhzCustomEventSceneSettingReload,
+    SubGhzCustomEventSceneSettingProtocols,
 
     SubGhzCustomEventSceneExit,
     SubGhzCustomEventSceneStay,

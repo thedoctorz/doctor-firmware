@@ -343,6 +343,57 @@ bool subghz_txrx_protocol_is_transmittable(SubGhzTxRx* instance, bool check_type
 void subghz_txrx_receiver_set_filter(SubGhzTxRx* instance, SubGhzProtocolFlag filter);
 
 /**
+ * Check whether a protocol can be toggled on or off for live RX
+ *
+ * @param protocol Pointer to a SubGhzProtocol
+ * @return true for decodable, non-RAW protocols with a decoder
+ */
+bool subghz_txrx_protocol_is_toggleable(const SubGhzProtocol* protocol);
+
+/**
+ * Count the protocols that can be toggled for live RX
+ *
+ * @param instance Pointer to a SubGhzTxRx
+ * @param enabled Optional output, how many of them are enabled
+ * @return size_t total toggleable protocols
+ */
+size_t subghz_txrx_count_toggleable_protocols(SubGhzTxRx* instance, size_t* enabled);
+
+/**
+ * Replace the set of protocols that live RX must not feed
+ *
+ * @param instance Pointer to a SubGhzTxRx
+ * @param list Comma-separated protocol names, empty or NULL enables all
+ */
+void subghz_txrx_set_disabled_protocols(SubGhzTxRx* instance, const char* list);
+
+/**
+ * Get the comma-separated names of disabled protocols
+ *
+ * @param instance Pointer to a SubGhzTxRx
+ * @return const char* valid until the list changes
+ */
+const char* subghz_txrx_get_disabled_protocols(SubGhzTxRx* instance);
+
+/**
+ * Check whether live RX feeds a protocol
+ *
+ * @param instance Pointer to a SubGhzTxRx
+ * @param name Protocol name
+ * @return true if the protocol is enabled
+ */
+bool subghz_txrx_is_protocol_enabled(SubGhzTxRx* instance, const char* name);
+
+/**
+ * Enable or disable a protocol on all live receivers, takes effect immediately
+ *
+ * @param instance Pointer to a SubGhzTxRx
+ * @param name Protocol name
+ * @param enabled true to feed the protocol decoder
+ */
+void subghz_txrx_set_protocol_enabled(SubGhzTxRx* instance, const char* name, bool enabled);
+
+/**
  * Set callback for receive data
  * 
  * @param instance Pointer to a SubGhzTxRx

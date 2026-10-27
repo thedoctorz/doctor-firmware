@@ -6,6 +6,8 @@
 
 typedef struct {
     SubGhzProtocolEncoderBase* base;
+    bool disabled;
+    bool dispatched;
 } SubGhzReceiverSlot;
 
 typedef struct {
@@ -54,6 +56,8 @@ SubGhzReceiver* subghz_receiver_alloc_init_ex(
         if(protocol->decoder && protocol->decoder->alloc) {
             SubGhzReceiverSlot* slot = SubGhzReceiverSlotArray_push_new(instance->slots);
             slot->base = protocol->decoder->alloc(environment);
+            slot->disabled = false;
+            slot->dispatched = false;
         }
     }
 
@@ -98,13 +102,17 @@ static void subghz_receiver_update_dispatch(SubGhzReceiver* instance) {
     instance->dispatch_count = 0;
     for
         M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
-            if((slot->base->protocol->flag & filter) != 0 &&
-               (slot->base->protocol->flag & modulation) != 0 &&
-               (slot->base->protocol->flag & band) != 0) {
+            const bool dispatch = !slot->disabled &&
+                                  (slot->base->protocol->flag & filter) != 0 &&
+                                  (slot->base->protocol->flag & modulation) != 0 &&
+                                  (slot->base->protocol->flag & band) != 0;
+            if(dispatch) {
+                if(!slot->dispatched) slot->base->protocol->decoder->reset(slot->base);
                 SubGhzReceiverDispatch* entry = &instance->dispatch[instance->dispatch_count++];
                 entry->context = slot->base;
                 entry->feed = slot->base->protocol->decoder->feed;
             }
+            slot->dispatched = dispatch;
         }
 }
 
@@ -184,6 +192,26 @@ void subghz_receiver_set_band(SubGhzReceiver* instance, SubGhzProtocolFlag band)
     }
     instance->band = band;
     instance->dispatch_dirty = true;
+}
+
+bool subghz_receiver_set_protocol_enabled(
+    SubGhzReceiver* instance,
+    const char* protocol_name,
+    bool enabled) {
+    furi_check(instance);
+    furi_check(protocol_name);
+
+    for
+        M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
+            if(strcmp(slot->base->protocol->name, protocol_name) == 0) {
+                if(slot->disabled == enabled) {
+                    slot->disabled = !enabled;
+                    instance->dispatch_dirty = true;
+                }
+                return true;
+            }
+        }
+    return false;
 }
 
 void subghz_receiver_set_gate(SubGhzReceiver* instance, SubGhzProtocolFlag gate) {

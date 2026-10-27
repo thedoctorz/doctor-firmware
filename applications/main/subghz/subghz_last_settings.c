@@ -27,14 +27,17 @@
 #define SUBGHZ_LAST_SETTING_FIELD_AUTOSAVE                          "Autosave"
 #define SUBGHZ_LAST_SETTING_FIELD_GPS_COMPANION                     "GpsCompanion"
 #define SUBGHZ_LAST_SETTING_FIELD_READ_RAW_AUTO                     "ReadRawAuto"
+#define SUBGHZ_LAST_SETTING_FIELD_DISABLED_PROTOCOLS                "DisabledProtocols"
 
 SubGhzLastSettings* subghz_last_settings_alloc(void) {
     SubGhzLastSettings* instance = malloc(sizeof(SubGhzLastSettings));
+    instance->disabled_protocols = furi_string_alloc();
     return instance;
 }
 
 void subghz_last_settings_free(SubGhzLastSettings* instance) {
     furi_assert(instance);
+    furi_string_free(instance->disabled_protocols);
     free(instance);
 }
 
@@ -60,6 +63,7 @@ void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count
     instance->autosave = false;
     instance->gps_companion = false;
     instance->read_raw_auto = false;
+    furi_string_reset(instance->disabled_protocols);
 
     Storage* storage = furi_record_open(RECORD_STORAGE);
     FlipperFormat* fff_data_file = flipper_format_file_alloc(storage);
@@ -200,6 +204,13 @@ void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count
                    1)) {
                 flipper_format_rewind(fff_data_file);
             }
+            if(!flipper_format_read_string(
+                   fff_data_file,
+                   SUBGHZ_LAST_SETTING_FIELD_DISABLED_PROTOCOLS,
+                   instance->disabled_protocols)) {
+                furi_string_reset(instance->disabled_protocols);
+                flipper_format_rewind(fff_data_file);
+            }
         } while(0);
     } else {
         FURI_LOG_E(TAG, "Error open file %s", SUBGHZ_LAST_SETTINGS_PATH);
@@ -332,6 +343,10 @@ bool subghz_last_settings_save(SubGhzLastSettings* instance) {
         }
         if(!flipper_format_write_bool(
                file, SUBGHZ_LAST_SETTING_FIELD_READ_RAW_AUTO, &instance->read_raw_auto, 1)) {
+            break;
+        }
+        if(!flipper_format_write_string(
+               file, SUBGHZ_LAST_SETTING_FIELD_DISABLED_PROTOCOLS, instance->disabled_protocols)) {
             break;
         }
         saved = true;

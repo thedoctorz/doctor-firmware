@@ -1,5 +1,5 @@
 entry,status,name,type,params
-Version,+,90.6,,
+Version,+,90.7,,
 Header,+,applications/drivers/subghz/cc1101_ext/cc1101_ext_interconnect.h,,
 Header,+,applications/drivers/subghz/si4463_ext/si4463_ext_interconnect.h,,
 Header,+,applications/services/applications.h,,
@@ -3200,6 +3200,7 @@ Function,+,subghz_receiver_set_band,void,"SubGhzReceiver*, SubGhzProtocolFlag"
 Function,+,subghz_receiver_set_filter,void,"SubGhzReceiver*, SubGhzProtocolFlag"
 Function,+,subghz_receiver_set_gate,void,"SubGhzReceiver*, SubGhzProtocolFlag"
 Function,+,subghz_receiver_set_modulation,void,"SubGhzReceiver*, SubGhzProtocolFlag"
+Function,+,subghz_receiver_set_protocol_enabled,_Bool,"SubGhzReceiver*, const char*, _Bool"
 Function,+,subghz_receiver_set_rx_callback,void,"SubGhzReceiver*, SubGhzReceiverCallback, void*"
 Function,+,subghz_rx_session_alloc,SubGhzRxSession*,"const SubGhzRxSessionCallbacks*, void*"
 Function,+,subghz_rx_session_free,void,SubGhzRxSession*

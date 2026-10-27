@@ -230,6 +230,12 @@ void subghz_custom_btn_configure_map(const char* protocol_name, uint32_t type, u
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_DOWN, 0x02, "Unlock");
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_LEFT, 0x04, "Trunk");
         subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_RIGHT, 0x08, "Panic");
+    } else if(!strcmp(protocol_name, "BD")) {
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_OK, custom_btn_original, "OG");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_UP, 1, "BTN1");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_DOWN, 2, "BTN2");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_LEFT, 3, "BTN3");
+        subghz_custom_btn_map_set(SUBGHZ_CUSTOM_BTN_RIGHT, 4, "BTN4");
     } else if(!strcmp(protocol_name, "Toyota Lexus")) {
         const uint8_t command =
             (custom_btn_original >= 1U && custom_btn_original <= 3U) ? custom_btn_original : 1U;

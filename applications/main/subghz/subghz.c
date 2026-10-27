@@ -208,6 +208,11 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
             subghz->view_dispatcher,
             SubGhzViewIdVariableItemList,
             variable_item_list_get_view(subghz->variable_item_list));
+        subghz->protocol_list = variable_item_list_alloc();
+        view_dispatcher_add_view(
+            subghz->view_dispatcher,
+            SubGhzViewIdProtocolList,
+            variable_item_list_get_view(subghz->protocol_list));
     }
     // Read RAW
     subghz->subghz_read_raw = subghz_read_raw_alloc(alloc_for_tx_only);
@@ -257,6 +262,8 @@ SubGhz* subghz_alloc(bool alloc_for_tx_only) {
         subghz->ignore_filter = subghz->last_settings->ignore_filter;
         subghz->filter = subghz->last_settings->filter;
         subghz->tx_power = subghz->last_settings->tx_power;
+        subghz_txrx_set_disabled_protocols(
+            subghz->txrx, furi_string_get_cstr(subghz->last_settings->disabled_protocols));
     } else {
         subghz->filter = SubGhzProtocolFlag_Decodable;
         subghz->ignore_filter = 0x0;
@@ -333,6 +340,8 @@ void subghz_free(SubGhz* subghz, bool alloc_for_tx_only) {
         // Variable Item List
         view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdVariableItemList);
         variable_item_list_free(subghz->variable_item_list);
+        view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdProtocolList);
+        variable_item_list_free(subghz->protocol_list);
     }
     // Read RAW
     view_dispatcher_remove_view(subghz->view_dispatcher, SubGhzViewIdReadRAW);

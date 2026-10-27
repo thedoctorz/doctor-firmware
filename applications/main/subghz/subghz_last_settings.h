@@ -38,6 +38,7 @@ typedef struct {
     bool autosave;
     bool gps_companion;
     bool read_raw_auto;
+    FuriString* disabled_protocols;
 } SubGhzLastSettings;
 
 SubGhzLastSettings* subghz_last_settings_alloc(void);

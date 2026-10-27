@@ -266,9 +266,41 @@ static void subghz_txrx_radio_device_power_off(SubGhzTxRx* instance) {
     if(furi_hal_power_is_otg_enabled()) furi_hal_power_disable_otg();
 }
 
+static bool subghz_txrx_protocol_list_has(const char* list, const char* name) {
+    const size_t name_len = strlen(name);
+    for(const char* token = list; *token;) {
+        const char* comma = strchr(token, ',');
+        const size_t token_len = comma ? (size_t)(comma - token) : strlen(token);
+        if(token_len == name_len && strncmp(token, name, name_len) == 0) return true;
+        if(!comma) break;
+        token = comma + 1;
+    }
+    return false;
+}
+
+static void subghz_txrx_apply_disabled_protocols(SubGhzTxRx* instance, SubGhzReceiver* receiver) {
+    if(!receiver) return;
+    const SubGhzProtocolRegistry* registry =
+        subghz_environment_get_protocol_registry(instance->environment);
+    const char* list = furi_string_get_cstr(instance->disabled_protocols);
+    for(size_t i = 0; i < subghz_protocol_registry_count(registry); i++) {
+        const char* name = subghz_protocol_registry_get_by_index(registry, i)->name;
+        subghz_receiver_set_protocol_enabled(
+            receiver, name, !subghz_txrx_protocol_list_has(list, name));
+    }
+}
+
+static void subghz_txrx_apply_disabled_protocols_all(SubGhzTxRx* instance) {
+    if(instance->dual_active) subghz_txrx_dual_lock(instance);
+    subghz_txrx_apply_disabled_protocols(instance, instance->receiver);
+    subghz_txrx_apply_disabled_protocols(instance, instance->receiver_ext);
+    if(instance->dual_active) subghz_txrx_dual_unlock(instance);
+}
+
 SubGhzTxRx* subghz_txrx_alloc(void) {
     subghz_devices_init();
     SubGhzTxRx* instance = malloc(sizeof(SubGhzTxRx));
+    instance->disabled_protocols = furi_string_alloc();
     instance->setting = subghz_setting_alloc();
     subghz_setting_load(instance->setting, EXT_PATH("subghz/assets/setting_user"));
 
@@ -329,6 +361,7 @@ SubGhzTxRx* subghz_txrx_alloc(void) {
     subghz_environment_set_protocol_registry(
         instance->environment, (void*)&subghz_protocol_registry);
     instance->receiver = subghz_receiver_alloc_init(instance->environment);
+    subghz_txrx_apply_disabled_protocols(instance, instance->receiver);
 
     subghz_worker_set_overrun_callback(instance->worker, subghz_txrx_worker_reset);
     subghz_worker_set_pair_callback(instance->worker, subghz_txrx_worker_decode);
@@ -367,6 +400,7 @@ void subghz_txrx_free(SubGhzTxRx* instance) {
     furi_string_free(instance->rx_preset.name);
     furi_string_free(instance->preset->name);
     furi_string_free(instance->preset_ext->name);
+    furi_string_free(instance->disabled_protocols);
     subghz_setting_free(instance->setting);
     furi_mutex_free(instance->hopper_mutex);
 
@@ -2031,6 +2065,83 @@ void subghz_txrx_receiver_set_filter(SubGhzTxRx* instance, SubGhzProtocolFlag fi
     subghz_receiver_set_filter(instance->receiver, filter);
 }
 
+bool subghz_txrx_protocol_is_toggleable(const SubGhzProtocol* protocol) {
+    furi_assert(protocol);
+    return (protocol->flag & SubGhzProtocolFlag_Decodable) &&
+           !(protocol->flag & (SubGhzProtocolFlag_RAW | SubGhzProtocolFlag_BinRAW)) &&
+           protocol->decoder && protocol->decoder->alloc;
+}
+
+size_t subghz_txrx_count_toggleable_protocols(SubGhzTxRx* instance, size_t* enabled) {
+    furi_assert(instance);
+    const SubGhzProtocolRegistry* registry =
+        subghz_environment_get_protocol_registry(instance->environment);
+    const char* list = furi_string_get_cstr(instance->disabled_protocols);
+    size_t total = 0;
+    size_t on = 0;
+    for(size_t i = 0; i < subghz_protocol_registry_count(registry); i++) {
+        const SubGhzProtocol* protocol = subghz_protocol_registry_get_by_index(registry, i);
+        if(!subghz_txrx_protocol_is_toggleable(protocol)) continue;
+        total++;
+        if(!subghz_txrx_protocol_list_has(list, protocol->name)) on++;
+    }
+    if(enabled) *enabled = on;
+    return total;
+}
+
+void subghz_txrx_set_disabled_protocols(SubGhzTxRx* instance, const char* list) {
+    furi_assert(instance);
+    furi_string_set(instance->disabled_protocols, list ? list : "");
+    subghz_txrx_apply_disabled_protocols_all(instance);
+}
+
+const char* subghz_txrx_get_disabled_protocols(SubGhzTxRx* instance) {
+    furi_assert(instance);
+    return furi_string_get_cstr(instance->disabled_protocols);
+}
+
+bool subghz_txrx_is_protocol_enabled(SubGhzTxRx* instance, const char* name) {
+    furi_assert(instance);
+    furi_assert(name);
+    return !subghz_txrx_protocol_list_has(furi_string_get_cstr(instance->disabled_protocols), name);
+}
+
+void subghz_txrx_set_protocol_enabled(SubGhzTxRx* instance, const char* name, bool enabled) {
+    furi_assert(instance);
+    furi_assert(name);
+    if(subghz_txrx_is_protocol_enabled(instance, name) == enabled) return;
+
+    if(enabled) {
+        FuriString* list = furi_string_alloc();
+        const char* token = furi_string_get_cstr(instance->disabled_protocols);
+        const size_t name_len = strlen(name);
+        while(*token) {
+            const char* comma = strchr(token, ',');
+            const size_t token_len = comma ? (size_t)(comma - token) : strlen(token);
+            if(token_len != name_len || strncmp(token, name, name_len) != 0) {
+                if(!furi_string_empty(list)) furi_string_push_back(list, ',');
+                furi_string_cat_printf(list, "%.*s", (int)token_len, token);
+            }
+            if(!comma) break;
+            token = comma + 1;
+        }
+        furi_string_swap(instance->disabled_protocols, list);
+        furi_string_free(list);
+    } else {
+        if(!furi_string_empty(instance->disabled_protocols)) {
+            furi_string_push_back(instance->disabled_protocols, ',');
+        }
+        furi_string_cat_str(instance->disabled_protocols, name);
+    }
+
+    if(instance->dual_active) subghz_txrx_dual_lock(instance);
+    if(instance->receiver) subghz_receiver_set_protocol_enabled(instance->receiver, name, enabled);
+    if(instance->receiver_ext) {
+        subghz_receiver_set_protocol_enabled(instance->receiver_ext, name, enabled);
+    }
+    if(instance->dual_active) subghz_txrx_dual_unlock(instance);
+}
+
 static void subghz_txrx_rx_callback_trampoline(
     SubGhzReceiver* receiver,
     SubGhzProtocolDecoderBase* decoder_base,
@@ -2561,6 +2672,8 @@ bool subghz_txrx_dual_rx_start(SubGhzTxRx* instance) {
         subghz_txrx_dual_alloc_receiver(instance->environment, instance->preset);
     instance->receiver_ext =
         subghz_txrx_dual_alloc_receiver(instance->environment, instance->preset_ext);
+    subghz_txrx_apply_disabled_protocols(instance, instance->receiver);
+    subghz_txrx_apply_disabled_protocols(instance, instance->receiver_ext);
     instance->worker_ext = subghz_worker_alloc_ex(2048);
 
     instance->dual_chain_int.receiver = instance->receiver;
@@ -2620,6 +2733,7 @@ void subghz_txrx_dual_rx_stop(SubGhzTxRx* instance) {
     if(instance->receiver) subghz_receiver_free(instance->receiver);
     instance->worker = subghz_worker_alloc();
     instance->receiver = subghz_receiver_alloc_init(instance->environment);
+    subghz_txrx_apply_disabled_protocols(instance, instance->receiver);
     instance->decoder_result = NULL;
 
     subghz_worker_set_overrun_callback(instance->worker, subghz_txrx_worker_reset);

@@ -76,6 +76,18 @@ void subghz_receiver_set_band(SubGhzReceiver* instance, SubGhzProtocolFlag band)
 void subghz_receiver_set_gate(SubGhzReceiver* instance, SubGhzProtocolFlag gate);
 
 /**
+ * Enable or disable a single decoder. Disabled decoders are not fed any pulses.
+ * @param instance Pointer to a SubGhzReceiver instance
+ * @param protocol_name Protocol name
+ * @param enabled true to feed the decoder, false to skip it
+ * @return true if the receiver has a decoder with this name
+ */
+bool subghz_receiver_set_protocol_enabled(
+    SubGhzReceiver* instance,
+    const char* protocol_name,
+    bool enabled);
+
+/**
  * Search for a cattery by his name.
  * @param instance Pointer to a SubGhzReceiver instance
  * @param decoder_name Receiver name

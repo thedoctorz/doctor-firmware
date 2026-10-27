@@ -97,6 +97,8 @@ struct SubGhzTxRx {
     SubGhzReceiverCallback rx_callback;
     void* rx_callback_context;
 
+    FuriString* disabled_protocols;
+
     bool debug_pin_state;
 
     bool dual_active;

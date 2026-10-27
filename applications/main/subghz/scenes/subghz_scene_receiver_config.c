@@ -498,6 +498,20 @@ static void subghz_scene_receiver_config_set_gps_companion(VariableItem* item) {
 
 static uint32_t subghz_scene_receiver_config_idx_lock = UINT32_MAX;
 static uint32_t subghz_scene_receiver_config_idx_reset = UINT32_MAX;
+static uint32_t subghz_scene_receiver_config_idx_protocols = UINT32_MAX;
+
+static bool subghz_scene_receiver_config_in_protocols(SubGhz* subghz) {
+    return scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReceiverProtocols) ==
+           SubGhzCustomEventManagerSet;
+}
+
+static void subghz_scene_receiver_config_show_protocols(SubGhz* subghz, VariableItem* item) {
+    size_t enabled = 0;
+    const size_t total = subghz_txrx_count_toggleable_protocols(subghz->txrx, &enabled);
+    char text_buf[10] = {0};
+    snprintf(text_buf, sizeof(text_buf), "%zu/%zu", enabled, total);
+    variable_item_set_current_value_text(item, text_buf);
+}
 
 static uint32_t subghz_scene_receiver_config_last_index(SubGhz* subghz) {
     uint32_t n = 0;
@@ -512,6 +526,9 @@ static void subghz_scene_receiver_config_var_list_enter_callback(void* context, 
     if(index == subghz_scene_receiver_config_idx_lock) {
         view_dispatcher_send_custom_event(
             subghz->view_dispatcher, SubGhzCustomEventSceneSettingLock);
+    } else if(index == subghz_scene_receiver_config_idx_protocols) {
+        view_dispatcher_send_custom_event(
+            subghz->view_dispatcher, SubGhzCustomEventSceneSettingProtocols);
     } else if(index == subghz_scene_receiver_config_idx_reset) {
         // Reset all values to default state!
         subghz_txrx_set_preset_internal(
@@ -538,6 +555,8 @@ static void subghz_scene_receiver_config_var_list_enter_callback(void* context, 
         subghz_txrx_receiver_set_filter(subghz->txrx, subghz->filter);
         subghz->last_settings->ignore_filter = subghz->ignore_filter;
         subghz->last_settings->filter = subghz->filter;
+        subghz_txrx_set_disabled_protocols(subghz->txrx, "");
+        furi_string_reset(subghz->last_settings->disabled_protocols);
         subghz->last_settings->delete_old_signals = false;
         subghz->last_settings->autosave = false;
         subghz->last_settings->read_raw_auto = false;
@@ -565,6 +584,7 @@ static void subghz_scene_receiver_config_populate(SubGhz* subghz) {
         subghz_txrx_preset_make_valid(subghz->txrx, subghz->tx_power);
     subghz_scene_receiver_config_ensure_mods(subghz);
     SubGhzRadioPreset preset = subghz_txrx_get_preset(subghz->txrx);
+    subghz_scene_receiver_config_idx_protocols = UINT32_MAX;
 
     item = variable_item_list_add(
         subghz->variable_item_list,
@@ -724,6 +744,11 @@ static void subghz_scene_receiver_config_populate(SubGhz* subghz) {
         variable_item_set_current_value_index(item, value_index);
         variable_item_set_current_value_text(item, combobox_text[value_index]);
 
+        item = variable_item_list_add(subghz->variable_item_list, "Protocols", 1, NULL, NULL);
+        subghz_scene_receiver_config_show_protocols(subghz, item);
+        subghz_scene_receiver_config_idx_protocols =
+            subghz_scene_receiver_config_last_index(subghz);
+
         item = variable_item_list_add(
             subghz->variable_item_list,
             "Delete old signals when memory is full",
@@ -812,7 +837,15 @@ static void subghz_scene_receiver_config_populate(SubGhz* subghz) {
 
 void subghz_scene_receiver_config_on_enter(void* context) {
     SubGhz* subghz = context;
-    subghz_scene_receiver_config_populate(subghz);
+    if(subghz_scene_receiver_config_in_protocols(subghz)) {
+        scene_manager_set_scene_state(
+            subghz->scene_manager, SubGhzSceneReceiverProtocols, SubGhzCustomEventManagerNoSet);
+        VariableItem* item = variable_item_list_get(
+            subghz->variable_item_list, (uint8_t)subghz_scene_receiver_config_idx_protocols);
+        if(item) subghz_scene_receiver_config_show_protocols(subghz, item);
+    } else {
+        subghz_scene_receiver_config_populate(subghz);
+    }
     view_dispatcher_switch_to_view(subghz->view_dispatcher, SubGhzViewIdVariableItemList);
 }
 
@@ -827,6 +860,11 @@ bool subghz_scene_receiver_config_on_event(void* context, SceneManagerEvent even
             consumed = true;
         } else if(event.event == SubGhzCustomEventSceneSettingResetToDefault) {
             scene_manager_previous_scene(subghz->scene_manager);
+            consumed = true;
+        } else if(event.event == SubGhzCustomEventSceneSettingProtocols) {
+            scene_manager_set_scene_state(
+                subghz->scene_manager, SubGhzSceneReceiverProtocols, SubGhzCustomEventManagerSet);
+            scene_manager_next_scene(subghz->scene_manager, SubGhzSceneReceiverProtocols);
             consumed = true;
         } else if(event.event == SubGhzCustomEventSceneSettingReload) {
             uint8_t selected =
@@ -846,6 +884,8 @@ bool subghz_scene_receiver_config_on_event(void* context, SceneManagerEvent even
 
 void subghz_scene_receiver_config_on_exit(void* context) {
     SubGhz* subghz = context;
+    if(subghz_scene_receiver_config_in_protocols(subghz)) return;
+
     variable_item_list_set_selected_item(subghz->variable_item_list, 0);
     variable_item_list_reset(subghz->variable_item_list);
 
