@@ -105,7 +105,7 @@ void* subghz_protocol_encoder_came_atomo_alloc(SubGhzEnvironment* environment) {
         sizeof(SubGhzProtocolEncoderCameAtomo),
         &subghz_protocol_came_atomo,
         1,
-        900); //actual size 766+
+        1024);
 }
 
 static LevelDuration
@@ -389,7 +389,10 @@ SubGhzProtocolStatus
     SubGhzProtocolStatus res = SubGhzProtocolStatusError;
     do {
         if(SubGhzProtocolStatusOk !=
-           subghz_block_generic_deserialize(&instance->generic, flipper_format)) {
+           subghz_block_generic_deserialize_check_count_bit(
+               &instance->generic,
+               flipper_format,
+               subghz_protocol_came_atomo_const.min_count_bit_for_found)) {
             FURI_LOG_E(TAG, "Deserialize error");
             break;
         }

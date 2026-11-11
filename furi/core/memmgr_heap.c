@@ -241,7 +241,7 @@ size_t memmgr_heap_get_thread_memory(FuriThreadId thread_id) {
                     BlockLink_t* pxLink = (void*)puc;
 
                     if((pxLink->xBlockSize & heapBLOCK_ALLOCATED_BITMASK) &&
-                       pxLink->pxNextFreeBlock == NULL) {
+                       pxLink->pxNextFreeBlock == heapPROTECT_BLOCK_POINTER(NULL)) {
                         leftovers += data->value;
                     }
                 }

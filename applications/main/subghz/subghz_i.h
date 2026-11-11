@@ -130,6 +130,7 @@ struct SubGhz {
 
     SubGhzScenePlugin add_manually_plugin;
     SubGhzScenePlugin clean_dupes_plugin;
+    SubGhzScenePlugin settings_manager_plugin;
 };
 
 #ifdef __cplusplus

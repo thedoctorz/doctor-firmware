@@ -6,26 +6,147 @@
 #include <string.h>
 #include <flipper_format/flipper_format_i.h>
 #include <toolbox/stream/stream.h>
+#include <toolbox/stream/string_stream.h>
 
-#define SUBGHZ_HISTORY_MAX       55
-#define SUBGHZ_HISTORY_FREE_HEAP 20480
-#define TAG                      "SubGhzHistory"
+#define SUBGHZ_HISTORY_MAX           255
+#define SUBGHZ_HISTORY_CHUNK_SIZE    8
+#define SUBGHZ_HISTORY_FREE_HEAP     12288
+#define SUBGHZ_HISTORY_FREE_BLOCK    1032
+#define SUBGHZ_HISTORY_TRIM_HEADROOM 2048
+#define TAG                          "SubGhzHistory"
+typedef struct {
+    SubGhzRadioPreset preset;
+    size_t references;
+} SubGhzHistoryPreset;
+
+static SubGhzRadioPreset* subghz_history_preset_copy(const SubGhzRadioPreset* preset) {
+    SubGhzHistoryPreset* shared = malloc(sizeof(SubGhzHistoryPreset));
+    shared->references = 1;
+    shared->preset.frequency = preset->frequency;
+    shared->preset.name = furi_string_alloc_set(preset->name);
+    shared->preset.data_size = preset->data_size;
+    shared->preset.data = NULL;
+    if(preset->data && preset->data_size) {
+        shared->preset.data = malloc(preset->data_size);
+        memcpy(shared->preset.data, preset->data, preset->data_size);
+    }
+    return &shared->preset;
+}
+
+static void subghz_history_preset_release(SubGhzRadioPreset* preset) {
+    SubGhzHistoryPreset* shared = (SubGhzHistoryPreset*)preset;
+    furi_assert(shared->references);
+    if(--shared->references) return;
+    furi_string_free(preset->name);
+    free(preset->data);
+    free(shared);
+}
+
+typedef struct {
+    uint64_t key;
+    uint64_t key2;
+    uint32_t cnt;
+    uint32_t raw_cnt;
+    uint32_t serial;
+    uint32_t btn;
+    uint32_t type;
+    uint8_t present;
+} SubGhzHistoryIdentity;
+
+enum {
+    HistoryHasKey = 1 << 0,
+    HistoryHasKey2 = 1 << 1,
+    HistoryHasCnt = 1 << 2,
+    HistoryHasRawCnt = 1 << 3,
+    HistoryHasSerial = 1 << 4,
+    HistoryHasBtn = 1 << 5,
+    HistoryHasType = 1 << 6,
+};
 
 typedef struct {
     FuriString* item_str;
     FlipperFormat* flipper_string;
+    uint8_t* serialized;
+    size_t serialized_size;
     uint8_t type;
     uint8_t source; // dual RX radio source marker: 0 = internal, 1 = external
 
     const SubGhzProtocol* protocol;
     SubGhzHistoryButtonIcon button_icon;
     SubGhzRadioPreset* preset;
+    SubGhzHistoryIdentity identity;
+    bool identity_valid;
     DateTime datetime;
 } SubGhzHistoryItem;
 
-ARRAY_DEF(SubGhzHistoryItemArray, SubGhzHistoryItem, M_POD_OPLIST) //-V658
+static void subghz_history_item_free_format(SubGhzHistoryItem* item) {
+    if(item->flipper_string) flipper_format_free(item->flipper_string);
+    free(item->serialized);
+}
 
-#define M_OPL_SubGhzHistoryItemArray_t() ARRAY_OPLIST(SubGhzHistoryItemArray, M_POD_OPLIST)
+static FlipperFormat* subghz_history_item_format(SubGhzHistoryItem* item) {
+    if(!item->flipper_string && item->serialized) {
+        item->flipper_string = flipper_format_string_alloc();
+        stream_write(
+            flipper_format_get_raw_stream(item->flipper_string),
+            item->serialized,
+            item->serialized_size);
+        flipper_format_rewind(item->flipper_string);
+        free(item->serialized);
+        item->serialized = NULL;
+        item->serialized_size = 0;
+    }
+    return item->flipper_string;
+}
+
+typedef struct {
+    SubGhzHistoryItem*
+        chunks[(SUBGHZ_HISTORY_MAX + SUBGHZ_HISTORY_CHUNK_SIZE - 1) / SUBGHZ_HISTORY_CHUNK_SIZE];
+    size_t size;
+} SubGhzHistoryItemArray[1];
+typedef SubGhzHistoryItemArray SubGhzHistoryItemArray_t;
+
+static void SubGhzHistoryItemArray_init(SubGhzHistoryItemArray_t data) {
+    memset(data, 0, sizeof(SubGhzHistoryItemArray));
+}
+static size_t SubGhzHistoryItemArray_size(SubGhzHistoryItemArray_t data) {
+    return data->size;
+}
+static SubGhzHistoryItem* SubGhzHistoryItemArray_get(SubGhzHistoryItemArray_t data, size_t index) {
+    furi_check(index < data->size);
+    return &data->chunks[index / SUBGHZ_HISTORY_CHUNK_SIZE][index % SUBGHZ_HISTORY_CHUNK_SIZE];
+}
+static SubGhzHistoryItem* SubGhzHistoryItemArray_push_raw(SubGhzHistoryItemArray_t data) {
+    furi_check(data->size < SUBGHZ_HISTORY_MAX);
+    size_t chunk = data->size / SUBGHZ_HISTORY_CHUNK_SIZE;
+    if(!data->chunks[chunk])
+        data->chunks[chunk] = malloc(sizeof(SubGhzHistoryItem) * SUBGHZ_HISTORY_CHUNK_SIZE);
+    data->size++;
+    SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(data, data->size - 1);
+    memset(item, 0, sizeof(*item));
+    return item;
+}
+static void SubGhzHistoryItemArray_clear(SubGhzHistoryItemArray_t data) {
+    for(size_t i = 0; i < COUNT_OF(data->chunks); i++)
+        free(data->chunks[i]);
+    SubGhzHistoryItemArray_init(data);
+}
+static void SubGhzHistoryItemArray_reset(SubGhzHistoryItemArray_t data) {
+    SubGhzHistoryItemArray_clear(data);
+}
+static void
+    SubGhzHistoryItemArray_remove_v(SubGhzHistoryItemArray_t data, size_t first, size_t last) {
+    furi_check(last == first + 1 && last <= data->size);
+    for(size_t i = first; i + 1 < data->size; i++)
+        *SubGhzHistoryItemArray_get(data, i) = *SubGhzHistoryItemArray_get(data, i + 1);
+    memset(SubGhzHistoryItemArray_get(data, data->size - 1), 0, sizeof(SubGhzHistoryItem));
+    data->size--;
+    if(data->size % SUBGHZ_HISTORY_CHUNK_SIZE == 0) {
+        size_t empty = data->size / SUBGHZ_HISTORY_CHUNK_SIZE;
+        free(data->chunks[empty]);
+        data->chunks[empty] = NULL;
+    }
+}
 
 typedef struct {
     SubGhzHistoryItemArray_t data;
@@ -36,12 +157,62 @@ struct SubGhzHistory {
     uint16_t last_index_write;
     FuriString* tmp_string;
     SubGhzHistoryStruct* history;
+    void* tx_reserve;
+    size_t tx_reserved;
+    size_t tx_wanted;
 
     // GPS geotag applied to newly added items
     bool gps_valid;
     float gps_latitude;
     float gps_longitude;
 };
+
+size_t subghz_history_tx_budget(const char* protocol) {
+    if(!protocol) return 24576;
+    if(!strcmp(protocol, "Toyota Lexus")) return 24576;
+    if(!strcmp(protocol, "Mercedes V1") || !strcmp(protocol, "Datsun Lada")) return 16384;
+    if(!strcmp(protocol, "Princeton") || !strcmp(protocol, "Holtek_HT12X")) return 2048;
+    if(!strcmp(protocol, "Security+ 1.0") || !strcmp(protocol, "Security+ 2.0")) return 4096;
+    if(!strcmp(protocol, "Nice FloR-S") || !strcmp(protocol, "RAW") || !strcmp(protocol, "KeeLoq"))
+        return 16384;
+    return 12288;
+}
+
+static bool subghz_history_reserve_locked(SubGhzHistory* instance, size_t wanted) {
+    instance->tx_wanted = MAX(instance->tx_wanted, wanted);
+    if(instance->tx_reserved >= wanted) return true;
+    const size_t previous = instance->tx_reserved;
+    free(instance->tx_reserve);
+    instance->tx_reserve = NULL;
+    instance->tx_reserved = 0;
+    if(memmgr_heap_get_max_free_block() >= wanted + 8 &&
+       memmgr_get_free_heap() >= wanted + SUBGHZ_HISTORY_FREE_HEAP + 2048) {
+        instance->tx_reserve = malloc(wanted);
+        instance->tx_reserved = wanted;
+        return true;
+    }
+    if(previous && memmgr_heap_get_max_free_block() >= previous + 8) {
+        instance->tx_reserve = malloc(previous);
+        instance->tx_reserved = previous;
+    }
+    return false;
+}
+
+void subghz_history_tx_release(SubGhzHistory* instance) {
+    if(!instance) return;
+    furi_mutex_acquire(instance->format_mutex, FuriWaitForever);
+    free(instance->tx_reserve);
+    instance->tx_reserve = NULL;
+    instance->tx_reserved = 0;
+    furi_mutex_release(instance->format_mutex);
+}
+
+void subghz_history_tx_restore(SubGhzHistory* instance) {
+    if(!instance || !instance->tx_wanted) return;
+    furi_mutex_acquire(instance->format_mutex, FuriWaitForever);
+    subghz_history_reserve_locked(instance, instance->tx_wanted);
+    furi_mutex_release(instance->format_mutex);
+}
 
 SubGhzHistory* subghz_history_alloc(void) {
     SubGhzHistory* instance = malloc(sizeof(SubGhzHistory));
@@ -50,8 +221,9 @@ SubGhzHistory* subghz_history_alloc(void) {
     instance->history = malloc(sizeof(SubGhzHistoryStruct));
     SubGhzHistoryItemArray_init(instance->history->data);
 
-    SubGhzHistoryItemArray_reserve(instance->history->data, SUBGHZ_HISTORY_MAX);
     instance->last_index_write = 0;
+    instance->tx_reserve = NULL;
+    instance->tx_reserved = instance->tx_wanted = 0;
     instance->gps_valid = false;
     instance->gps_latitude = 0;
     instance->gps_longitude = 0;
@@ -72,17 +244,17 @@ void subghz_history_set_location(
 void subghz_history_free(SubGhzHistory* instance) {
     furi_assert(instance);
     furi_string_free(instance->tmp_string);
-    for
-        M_EACH(item, instance->history->data, SubGhzHistoryItemArray_t) {
-            furi_string_free(item->item_str);
-            furi_string_free(item->preset->name);
-            free(item->preset->data);
-            free(item->preset);
-            flipper_format_free(item->flipper_string);
-            item->type = 0;
-        }
+    for(size_t item_index = 0; item_index < SubGhzHistoryItemArray_size(instance->history->data);
+        item_index++) {
+        SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, item_index);
+        furi_string_free(item->item_str);
+        subghz_history_preset_release(item->preset);
+        subghz_history_item_free_format(item);
+        item->type = 0;
+    }
     SubGhzHistoryItemArray_clear(instance->history->data);
     free(instance->history);
+    free(instance->tx_reserve);
     furi_mutex_free(instance->format_mutex);
     free(instance);
 }
@@ -96,6 +268,12 @@ uint32_t subghz_history_get_frequency(SubGhzHistory* instance, uint16_t idx) {
 SubGhzRadioPreset* subghz_history_get_radio_preset(SubGhzHistory* instance, uint16_t idx) {
     furi_assert(instance);
     SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, idx);
+    SubGhzHistoryPreset* shared = (SubGhzHistoryPreset*)item->preset;
+    if(shared->references > 1) {
+        SubGhzRadioPreset* copy = subghz_history_preset_copy(item->preset);
+        subghz_history_preset_release(item->preset);
+        item->preset = copy;
+    }
     return item->preset;
 }
 
@@ -108,16 +286,18 @@ const char* subghz_history_get_preset(SubGhzHistory* instance, uint16_t idx) {
 void subghz_history_reset(SubGhzHistory* instance) {
     furi_assert(instance);
     furi_string_reset(instance->tmp_string);
-    for
-        M_EACH(item, instance->history->data, SubGhzHistoryItemArray_t) {
-            furi_string_free(item->item_str);
-            furi_string_free(item->preset->name);
-            free(item->preset->data);
-            free(item->preset);
-            flipper_format_free(item->flipper_string);
-            item->type = 0;
-        }
+    for(size_t item_index = 0; item_index < SubGhzHistoryItemArray_size(instance->history->data);
+        item_index++) {
+        SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, item_index);
+        furi_string_free(item->item_str);
+        subghz_history_preset_release(item->preset);
+        subghz_history_item_free_format(item);
+        item->type = 0;
+    }
     SubGhzHistoryItemArray_reset(instance->history->data);
+    free(instance->tx_reserve);
+    instance->tx_reserve = NULL;
+    instance->tx_reserved = instance->tx_wanted = 0;
     instance->last_index_write = 0;
 }
 
@@ -128,13 +308,25 @@ void subghz_history_delete_item(SubGhzHistory* instance, uint16_t idx) {
     if(idx < SubGhzHistoryItemArray_size(instance->history->data)) {
         SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, idx);
         furi_string_free(item->item_str);
-        furi_string_free(item->preset->name);
-        free(item->preset->data);
-        free(item->preset);
-        flipper_format_free(item->flipper_string);
+        subghz_history_preset_release(item->preset);
+        subghz_history_item_free_format(item);
         item->type = 0;
         SubGhzHistoryItemArray_remove_v(instance->history->data, idx, idx + 1);
         instance->last_index_write--;
+        size_t wanted = 0;
+        for(size_t i = 0; i < instance->last_index_write; i++) {
+            const SubGhzProtocol* protocol =
+                SubGhzHistoryItemArray_get(instance->history->data, i)->protocol;
+            if(protocol->flag & SubGhzProtocolFlag_Send)
+                wanted = MAX(wanted, subghz_history_tx_budget(protocol->name));
+        }
+        if(wanted < instance->tx_wanted) {
+            free(instance->tx_reserve);
+            instance->tx_reserve = NULL;
+            instance->tx_reserved = 0;
+            instance->tx_wanted = wanted;
+            if(wanted) subghz_history_reserve_locked(instance, wanted);
+        }
     }
     furi_mutex_release(instance->format_mutex);
 }
@@ -172,17 +364,15 @@ uint8_t subghz_history_get_source(SubGhzHistory* instance, uint16_t idx) {
 const char* subghz_history_get_protocol_name(SubGhzHistory* instance, uint16_t idx) {
     furi_assert(instance);
     SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, idx);
-    if(!item || !item->flipper_string) {
-        FURI_LOG_E(TAG, "Missing Item");
-        furi_string_reset(instance->tmp_string);
+    if(!item) return "";
+    if(item->flipper_string) {
+        flipper_format_rewind(item->flipper_string);
+        if(!flipper_format_read_string(item->flipper_string, "Protocol", instance->tmp_string)) {
+            furi_string_reset(instance->tmp_string);
+        }
         return furi_string_get_cstr(instance->tmp_string);
     }
-    flipper_format_rewind(item->flipper_string);
-    if(!flipper_format_read_string(item->flipper_string, "Protocol", instance->tmp_string)) {
-        FURI_LOG_E(TAG, "Missing Protocol");
-        furi_string_reset(instance->tmp_string);
-    }
-    return furi_string_get_cstr(instance->tmp_string);
+    return item->protocol ? item->protocol->name : "";
 }
 
 DateTime subghz_history_get_datetime(SubGhzHistory* instance, uint16_t idx) {
@@ -198,7 +388,8 @@ DateTime subghz_history_get_datetime(SubGhzHistory* instance, uint16_t idx) {
 FlipperFormat* subghz_history_get_raw_data(SubGhzHistory* instance, uint16_t idx) {
     furi_assert(instance);
     SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, idx);
-    if(item->flipper_string) {
+    if(subghz_history_item_format(item)) {
+        item->identity_valid = false;
         return item->flipper_string;
     } else {
         return NULL;
@@ -212,9 +403,14 @@ FlipperFormat* subghz_history_get_raw_data_copy(SubGhzHistory* instance, uint16_
 
     furi_mutex_acquire(instance->format_mutex, FuriWaitForever);
     if(idx < instance->last_index_write) {
-        FlipperFormat* raw = subghz_history_get_raw_data(instance, idx);
-        if(raw) {
-            Stream* source = flipper_format_get_raw_stream(raw);
+        SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, idx);
+        if(item->serialized) {
+            copied = stream_write(
+                         flipper_format_get_raw_stream(copy),
+                         item->serialized,
+                         item->serialized_size) == item->serialized_size;
+        } else if(item->flipper_string) {
+            Stream* source = flipper_format_get_raw_stream(item->flipper_string);
             const size_t position = stream_tell(source);
             const size_t size = stream_size(source);
             copied = size && stream_copy_full(source, flipper_format_get_raw_stream(copy)) == size;
@@ -231,7 +427,8 @@ FlipperFormat* subghz_history_get_raw_data_copy(SubGhzHistory* instance, uint16_
 }
 bool subghz_history_get_text_space_left(SubGhzHistory* instance, FuriString* output) {
     furi_assert(instance);
-    if(memmgr_get_free_heap() < SUBGHZ_HISTORY_FREE_HEAP) {
+    if(memmgr_get_free_heap() < SUBGHZ_HISTORY_FREE_HEAP ||
+       memmgr_heap_get_max_free_block() < SUBGHZ_HISTORY_FREE_BLOCK) {
         if(output != NULL) furi_string_printf(output, "  RAM almost FULL");
         return true;
     }
@@ -239,9 +436,14 @@ bool subghz_history_get_text_space_left(SubGhzHistory* instance, FuriString* out
         if(output != NULL) furi_string_printf(output, "   Memory is FULL");
         return true;
     }
-    if(output != NULL)
-        furi_string_printf(output, "%02u/%02u", instance->last_index_write, SUBGHZ_HISTORY_MAX);
+    if(output != NULL) furi_string_printf(output, "#%u", instance->last_index_write);
     return false;
+}
+
+bool subghz_history_needs_memory_trim(SubGhzHistory* instance) {
+    furi_assert(instance);
+    return memmgr_get_free_heap() < SUBGHZ_HISTORY_FREE_HEAP + SUBGHZ_HISTORY_TRIM_HEADROOM ||
+           instance->last_index_write >= SUBGHZ_HISTORY_MAX;
 }
 
 uint16_t subghz_history_get_last_index(SubGhzHistory* instance) {
@@ -269,91 +471,108 @@ static bool subghz_history_read_uint32(FlipperFormat* ff, const char* key, uint3
 }
 
 static bool subghz_history_read_key2_u64(FlipperFormat* ff, uint64_t* value) {
-    uint8_t key_data[sizeof(uint64_t)] = {0};
-    flipper_format_rewind(ff);
-    bool have_key = flipper_format_read_hex(ff, "Key_2", key_data, sizeof(key_data));
-    if(!have_key) {
+    static const char* const names[] = {"Key_2", "Key2", "Secplus_packet_1"};
+    for(size_t field = 0; field < COUNT_OF(names); field++) {
+        FuriString* text = furi_string_alloc();
         flipper_format_rewind(ff);
-        have_key = flipper_format_read_hex(ff, "Key2", key_data, sizeof(key_data));
-    }
-    if(!have_key) return false;
-
-    *value = 0;
-    for(uint8_t i = 0; i < sizeof(key_data); i++) {
-        *value = (*value << 8) | key_data[i];
-    }
-    return true;
-}
-
-static bool
-    subghz_history_match_optional_uint32(FlipperFormat* a, FlipperFormat* b, const char* key) {
-    uint32_t value_a = 0;
-    uint32_t value_b = 0;
-    const bool have_a = subghz_history_read_uint32(a, key, &value_a);
-    const bool have_b = subghz_history_read_uint32(b, key, &value_b);
-
-    return (!have_a && !have_b) || (have_a && have_b && (value_a == value_b));
-}
-
-static bool subghz_history_keys_match(FlipperFormat* stored, FlipperFormat* candidate) {
-    uint64_t stored_key = 0;
-    uint64_t candidate_key = 0;
-    if(!subghz_block_generic_read_key_u64(candidate, &candidate_key)) return false;
-    if(!subghz_block_generic_read_key_u64(stored, &stored_key)) return false;
-    if(stored_key != candidate_key) return false;
-
-    uint64_t stored_key2 = 0;
-    uint64_t candidate_key2 = 0;
-    bool stored_has_key2 = subghz_history_read_key2_u64(stored, &stored_key2);
-    bool candidate_has_key2 = subghz_history_read_key2_u64(candidate, &candidate_key2);
-    return (stored_has_key2 == candidate_has_key2) &&
-           (!stored_has_key2 || (stored_key2 == candidate_key2));
-}
-
-static bool subghz_history_is_duplicate_item(FlipperFormat* stored, FlipperFormat* candidate) {
-    FuriString* stored_protocol = furi_string_alloc();
-    FuriString* candidate_protocol = furi_string_alloc();
-    bool duplicate = false;
-
-    do {
-        if(!subghz_history_read_string(stored, "Protocol", stored_protocol)) break;
-        if(!subghz_history_read_string(candidate, "Protocol", candidate_protocol)) break;
-        if(!furi_string_equal(stored_protocol, candidate_protocol)) break;
-
-        uint32_t stored_cnt = 0;
-        uint32_t candidate_cnt = 0;
-        bool stored_has_cnt = subghz_history_read_uint32(stored, "Cnt", &stored_cnt);
-        bool candidate_has_cnt = subghz_history_read_uint32(candidate, "Cnt", &candidate_cnt);
-        if(!candidate_has_cnt) {
-            stored_has_cnt = subghz_history_read_uint32(stored, "RawCnt", &stored_cnt);
-            candidate_has_cnt = subghz_history_read_uint32(candidate, "RawCnt", &candidate_cnt);
-        }
-
-        if(candidate_has_cnt && stored_has_cnt) {
-            if(stored_cnt != candidate_cnt) break;
-            if(!subghz_history_match_optional_uint32(stored, candidate, "Serial")) break;
-            if(!subghz_history_match_optional_uint32(stored, candidate, "Btn")) break;
-            if(!subghz_history_match_optional_uint32(stored, candidate, "Type")) break;
-            duplicate = stored_cnt == 0 ? subghz_history_keys_match(stored, candidate) : true;
-            break;
-        }
-
-        duplicate = subghz_history_keys_match(stored, candidate);
-    } while(false);
-
-    furi_string_free(candidate_protocol);
-    furi_string_free(stored_protocol);
-    return duplicate;
-}
-
-static bool subghz_history_is_duplicate(SubGhzHistory* instance, FlipperFormat* candidate, uint8_t source) {
-    for
-        M_EACH(item, instance->history->data, SubGhzHistoryItemArray_t) {
-            if(item->source == source && item->flipper_string &&
-               subghz_history_is_duplicate_item(item->flipper_string, candidate)) {
-                return true;
+        bool valid = flipper_format_read_string(ff, names[field], text);
+        const char* str = furi_string_get_cstr(text);
+        uint64_t key = 0;
+        unsigned digits = 0;
+        for(size_t i = 0; valid && str[i]; i++) {
+            if(str[i] == ' ' || str[i] == '\t') continue;
+            unsigned nibble;
+            if(str[i] >= '0' && str[i] <= '9')
+                nibble = str[i] - '0';
+            else if(str[i] >= 'A' && str[i] <= 'F')
+                nibble = str[i] - 'A' + 10;
+            else if(str[i] >= 'a' && str[i] <= 'f')
+                nibble = str[i] - 'a' + 10;
+            else {
+                valid = false;
+                break;
             }
+            if(++digits > 16) {
+                valid = false;
+                break;
+            }
+            key = (key << 4) | nibble;
         }
+        furi_string_free(text);
+        if(valid && digits == 16) {
+            *value = key;
+            return true;
+        }
+    }
+    return false;
+}
+
+static SubGhzHistoryIdentity subghz_history_identity_read(FlipperFormat* ff, bool keys_only) {
+    SubGhzHistoryIdentity value = {0};
+    if(subghz_block_generic_read_key_u64(ff, &value.key)) value.present |= HistoryHasKey;
+    if(subghz_history_read_key2_u64(ff, &value.key2)) value.present |= HistoryHasKey2;
+    if(keys_only) return value;
+    if(subghz_history_read_uint32(ff, "Cnt", &value.cnt)) value.present |= HistoryHasCnt;
+    if(subghz_history_read_uint32(ff, "RawCnt", &value.raw_cnt)) value.present |= HistoryHasRawCnt;
+    if(!value.cnt && !value.raw_cnt) return value;
+    if(subghz_history_read_uint32(ff, "Serial", &value.serial)) value.present |= HistoryHasSerial;
+    if(subghz_history_read_uint32(ff, "Btn", &value.btn)) value.present |= HistoryHasBtn;
+    if(subghz_history_read_uint32(ff, "Type", &value.type)) value.present |= HistoryHasType;
+    return value;
+}
+
+static bool subghz_history_uses_exact_keys(const SubGhzProtocol* protocol) {
+    return protocol->type == SubGhzProtocolTypeStatic ||
+           strcmp(protocol->name, "Security+ 2.0") == 0;
+}
+
+static bool subghz_history_identity_keys_match(
+    const SubGhzHistoryIdentity* stored,
+    const SubGhzHistoryIdentity* candidate) {
+    if(!(stored->present & candidate->present & HistoryHasKey)) return false;
+    if(stored->key != candidate->key) return false;
+    if((stored->present ^ candidate->present) & HistoryHasKey2) return false;
+    return !(stored->present & HistoryHasKey2) || stored->key2 == candidate->key2;
+}
+
+static bool subghz_history_identity_match(
+    const SubGhzHistoryIdentity* stored,
+    const SubGhzHistoryIdentity* candidate) {
+    const uint8_t counter = (candidate->present & HistoryHasCnt) ? HistoryHasCnt :
+                                                                   HistoryHasRawCnt;
+    if(stored->present & candidate->present & counter) {
+        const uint32_t a = counter == HistoryHasCnt ? stored->cnt : stored->raw_cnt;
+        const uint32_t b = counter == HistoryHasCnt ? candidate->cnt : candidate->raw_cnt;
+        if(a != b) return false;
+        if(!a) return subghz_history_identity_keys_match(stored, candidate);
+        const uint8_t optional = HistoryHasSerial | HistoryHasBtn | HistoryHasType;
+        if((stored->present ^ candidate->present) & optional) return false;
+        return (!(stored->present & HistoryHasSerial) || stored->serial == candidate->serial) &&
+               (!(stored->present & HistoryHasBtn) || stored->btn == candidate->btn) &&
+               (!(stored->present & HistoryHasType) || stored->type == candidate->type);
+    }
+    return subghz_history_identity_keys_match(stored, candidate);
+}
+
+static bool subghz_history_is_duplicate(
+    SubGhzHistory* instance,
+    const SubGhzProtocol* protocol,
+    const SubGhzHistoryIdentity* candidate,
+    uint8_t source) {
+    const bool keys_only = subghz_history_uses_exact_keys(protocol);
+    for(size_t item_index = 0; item_index < SubGhzHistoryItemArray_size(instance->history->data);
+        item_index++) {
+        SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, item_index);
+        if(item->source != source || item->protocol != protocol) continue;
+        if(!item->identity_valid) {
+            item->identity = subghz_history_identity_read(item->flipper_string, keys_only);
+            item->identity_valid = true;
+        }
+        const bool duplicate = keys_only ?
+                                   subghz_history_identity_keys_match(&item->identity, candidate) :
+                                   subghz_history_identity_match(&item->identity, candidate);
+        if(duplicate) return true;
+    }
     return false;
 }
 
@@ -408,7 +627,13 @@ static void subghz_history_format_item_string(
             }
         }
 
-        if(have_counter) {
+        if(!strcmp(furi_string_get_cstr(protocol), "PSA")) {
+            if(have_counter) {
+                furi_string_printf(output, "PSA 80bit Cnt:%lX", counter);
+            } else {
+                furi_string_set(output, "PSA 80bit");
+            }
+        } else if(have_counter) {
             furi_string_printf(output, "%s - %lX", furi_string_get_cstr(protocol), counter);
         } else {
             furi_string_set(output, protocol);
@@ -532,6 +757,24 @@ static SubGhzHistoryButtonIcon subghz_history_button_icon_from_fields(FlipperFor
     return icon;
 }
 
+static SubGhzRadioPreset*
+    subghz_history_preset_acquire(SubGhzHistory* instance, const SubGhzRadioPreset* preset) {
+    for(size_t item_index = 0; item_index < SubGhzHistoryItemArray_size(instance->history->data);
+        item_index++) {
+        SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, item_index);
+        const SubGhzRadioPreset* stored = item->preset;
+        if(stored->frequency == preset->frequency && stored->data_size == preset->data_size &&
+           furi_string_equal(stored->name, preset->name) &&
+           ((!stored->data && !preset->data) ||
+            (stored->data && preset->data &&
+             !memcmp(stored->data, preset->data, preset->data_size)))) {
+            ((SubGhzHistoryPreset*)item->preset)->references++;
+            return item->preset;
+        }
+    }
+    return subghz_history_preset_copy(preset);
+}
+
 bool subghz_history_add_to_history(
     SubGhzHistory* instance,
     void* context,
@@ -547,10 +790,14 @@ static bool subghz_history_add_to_history_source_locked(
     furi_assert(instance);
     furi_assert(context);
 
-    if(memmgr_get_free_heap() < SUBGHZ_HISTORY_FREE_HEAP) return false;
+    if(memmgr_get_free_heap() < SUBGHZ_HISTORY_FREE_HEAP ||
+       memmgr_heap_get_max_free_block() < SUBGHZ_HISTORY_FREE_BLOCK)
+        return false;
     if(instance->last_index_write >= SUBGHZ_HISTORY_MAX) return false;
 
     SubGhzProtocolDecoderBase* decoder_base = context;
+    furi_string_reset(instance->tmp_string);
+    subghz_protocol_decoder_base_get_string(decoder_base, instance->tmp_string);
 
     FlipperFormat* flipper_string = flipper_format_string_alloc();
     if(subghz_protocol_decoder_base_serialize(decoder_base, flipper_string, preset) !=
@@ -559,32 +806,31 @@ static bool subghz_history_add_to_history_source_locked(
         return false;
     }
 
-    if(subghz_history_is_duplicate(instance, flipper_string, source)) {
+    const SubGhzHistoryIdentity identity = subghz_history_identity_read(
+        flipper_string, subghz_history_uses_exact_keys(decoder_base->protocol));
+    if(subghz_history_is_duplicate(instance, decoder_base->protocol, &identity, source)) {
         flipper_format_free(flipper_string);
         return false;
     }
 
+    if(decoder_base->protocol->flag & SubGhzProtocolFlag_Send)
+        subghz_history_reserve_locked(
+            instance, subghz_history_tx_budget(decoder_base->protocol->name));
+    SubGhzRadioPreset* snapshot = subghz_history_preset_acquire(instance, preset);
     SubGhzHistoryItem* item = SubGhzHistoryItemArray_push_raw(instance->history->data);
-    item->preset = malloc(sizeof(SubGhzRadioPreset));
+    item->preset = snapshot;
     item->type = decoder_base->protocol->type;
     item->protocol = decoder_base->protocol;
     item->source = source;
-    item->preset->frequency = preset->frequency;
-    item->preset->name = furi_string_alloc();
-    furi_string_set(item->preset->name, preset->name);
-    item->preset->data = NULL;
-    if(preset->data && preset->data_size) {
-        item->preset->data = malloc(preset->data_size);
-        memcpy(item->preset->data, preset->data, preset->data_size);
-    }
-    item->preset->data_size = preset->data_size;
+    item->identity = identity;
+    item->identity_valid = true;
     furi_hal_rtc_get_datetime(&item->datetime);
 
     item->item_str = furi_string_alloc();
     item->flipper_string = flipper_string;
+    item->serialized = NULL;
+    item->serialized_size = 0;
     subghz_history_format_item_string(item->flipper_string, item->item_str, item->type);
-    furi_string_reset(instance->tmp_string);
-    subghz_protocol_decoder_base_get_string(decoder_base, instance->tmp_string);
     item->button_icon =
         subghz_history_button_icon_from_text(furi_string_get_cstr(instance->tmp_string));
     if(item->button_icon == SubGhzHistoryButtonIconDefault) {
@@ -599,6 +845,16 @@ static bool subghz_history_add_to_history_source_locked(
         flipper_format_write_float(item->flipper_string, "Lat", &instance->gps_latitude, 1);
         flipper_format_write_float(item->flipper_string, "Lon", &instance->gps_longitude, 1);
     }
+
+    Stream* capture = flipper_format_get_raw_stream(item->flipper_string);
+    item->serialized_size = stream_size(capture);
+    item->serialized = malloc(item->serialized_size);
+    stream_rewind(capture);
+    furi_check(
+        stream_read(capture, item->serialized, item->serialized_size) == item->serialized_size);
+    flipper_format_free(item->flipper_string);
+    item->flipper_string = NULL;
+    furi_string_reserve(item->item_str, 0);
 
     instance->last_index_write++;
     return true;

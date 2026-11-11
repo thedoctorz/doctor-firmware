@@ -344,6 +344,9 @@ static void subghz_setting_load_default_region(
     for(size_t i = 0; i < COUNT_OF(subghz_setting_si4463_presets); i++)
         subghz_setting_load_si4463_preset(instance, &subghz_setting_si4463_presets[i]);
 
+    subghz_setting_load_default_preset(
+        instance, "FM15k", subghz_device_cc1101_preset_fm15k_async_regs);
+
     instance->builtin_preset_count =
         SubGhzSettingCustomPresetItemArray_size(instance->preset->data);
 }

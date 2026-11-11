@@ -49,7 +49,7 @@ struct SubGhzProtocolDecoderUrmet {
     bool pending_high;
     uint16_t man_edges; // Manchester short-edge count before arming
     uint16_t bit_cnt;
-    uint8_t bit_buf[URMET_BITBUF];
+    uint8_t bit_buf[URMET_BITBUF / 8];
 
     // In-progress collection (may be aborted).
     uint8_t rx_gap_count;
@@ -169,17 +169,29 @@ static bool urmet_byte_count_ok(uint8_t byte_count) {
     return byte_count >= URMET_MIN_BYTES && byte_count <= URMET_MAX_BYTES;
 }
 
+static inline uint8_t urmet_bit_get(const uint8_t* bits, uint16_t i) {
+    return (bits[i >> 3] >> (i & 7)) & 1;
+}
+
+static inline void urmet_bit_set(uint8_t* bits, uint16_t i, bool level) {
+    if(level) {
+        bits[i >> 3] |= (uint8_t)(1 << (i & 7));
+    } else {
+        bits[i >> 3] &= (uint8_t) ~(1 << (i & 7));
+    }
+}
+
 // Decode inverted USART 8N1 (idle low, start high, LSB first, wire-inverted data).
 static uint8_t
     urmet_decode_inv_usart(const uint8_t* bits, uint16_t bit_cnt, uint8_t* out, uint8_t out_max) {
     uint8_t n = 0;
     uint16_t i = 0;
     while(i < bit_cnt && n < out_max) {
-        if(bits[i] != 1) {
+        if(urmet_bit_get(bits, i) != 1) {
             i++;
             continue;
         }
-        if(i > 0 && bits[i - 1] != 0) {
+        if(i > 0 && urmet_bit_get(bits, i - 1) != 0) {
             i++;
             continue;
         }
@@ -187,16 +199,16 @@ static uint8_t
 
         uint8_t val = 0;
         for(uint8_t b = 0; b < 8; b++) {
-            uint8_t wire = bits[i + 1 + b];
+            uint8_t wire = urmet_bit_get(bits, i + 1 + b);
             val |= (uint8_t)((wire ? 0 : 1) << b);
         }
-        if(bits[i + 9] != 0) {
+        if(urmet_bit_get(bits, i + 9) != 0) {
             i++;
             continue;
         }
         out[n++] = val;
         i += 10;
-        while(i < bit_cnt && bits[i] == 0)
+        while(i < bit_cnt && urmet_bit_get(bits, i) == 0)
             i++;
     }
     return n;
@@ -204,7 +216,7 @@ static uint8_t
 
 static void urmet_append_bits(uint8_t* bit_buf, uint16_t* bit_cnt, bool level, uint32_t n) {
     for(uint32_t i = 0; i < n && *bit_cnt < URMET_BITBUF; i++) {
-        bit_buf[(*bit_cnt)++] = level ? 1 : 0;
+        urmet_bit_set(bit_buf, (*bit_cnt)++, level);
     }
 }
 
@@ -543,7 +555,7 @@ void subghz_protocol_decoder_urmet_feed(void* context, bool level, uint32_t dura
     if(!level && duration >= URMET_END_GAP_US) {
         if(instance->step == UrmetStepData) {
             if(instance->bit_cnt < URMET_BITBUF) {
-                instance->bit_buf[instance->bit_cnt++] = 0;
+                urmet_bit_set(instance->bit_buf, instance->bit_cnt++, false);
             }
             subghz_protocol_decoder_urmet_finish(instance);
         } else if(

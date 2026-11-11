@@ -1,3 +1,4 @@
+#include "../helpers/subghz_txrx_activity.h"
 #include "../subghz_i.h"
 #include <dolphin/dolphin.h>
 #include <math.h>
@@ -97,6 +98,9 @@ static void subghz_scene_receiver_dual_add(
     if(subghz_history_add_to_history_source(history, decoder_base, &preset, source)) {
         subghz_scene_receiver_dual_log_frame(decoder_base, source);
     }
+    if(!(decoder_base->protocol->flag & (SubGhzProtocolFlag_RAW | SubGhzProtocolFlag_BinRAW))) {
+        subghz_txrx_activity_note_decode(subghz->txrx, source);
+    }
     subghz_receiver_reset(receiver);
 }
 
@@ -149,13 +153,18 @@ static void subghz_scene_receiver_dual_present_pending(SubGhz* subghz) {
         subghz_rx_key_state_set(subghz, SubGhzRxKeyStateAddKey);
         subghz_view_receiver_set_dual_dashboard(subghz->subghz_receiver, false);
     }
-    if(subghz->last_settings->delete_old_signals && count >= 55 && subghz->rx_presented) {
-        subghz_history_delete_item(history, 0);
-        subghz_view_receiver_delete_item(subghz->subghz_receiver, 0);
-        subghz->rx_presented--;
-        subghz->idx_menu_chosen = subghz_view_receiver_get_idx_menu(subghz->subghz_receiver);
+    bool trimmed = false;
+    if(subghz->last_settings->delete_old_signals) {
+        while(subghz_history_get_item(history) > 1 && subghz->rx_presented &&
+              subghz_history_needs_memory_trim(history)) {
+            subghz_history_delete_item(history, 0);
+            subghz_view_receiver_delete_item(subghz->subghz_receiver, 0);
+            subghz->rx_presented--;
+            trimmed = true;
+            subghz->idx_menu_chosen = subghz_view_receiver_get_idx_menu(subghz->subghz_receiver);
+        }
     }
-    if(added) subghz_scene_receiver_dual_update_statusbar(subghz);
+    if(added || trimmed) subghz_scene_receiver_dual_update_statusbar(subghz);
     subghz_txrx_dual_unlock(subghz->txrx);
 }
 
@@ -218,6 +227,7 @@ void subghz_scene_receiver_dual_on_enter(void* context) {
         return;
     }
 
+    subghz_txrx_activity_prepare(subghz->txrx, true);
     subghz->rx_presented = subghz_history_get_item(history);
     subghz_txrx_dual_set_filter(subghz->txrx, subghz->filter);
     subghz_txrx_dual_set_rx_callback(
@@ -230,8 +240,10 @@ void subghz_scene_receiver_dual_on_enter(void* context) {
         scene_manager_search_and_switch_to_previous_scene(subghz->scene_manager, SubGhzSceneStart);
         return;
     }
+    subghz_txrx_activity_start(subghz->txrx);
     subghz_txrx_dual_lock(subghz->txrx);
     subghz_scene_receiver_dual_set_labels(subghz);
+    subghz_view_receiver_update_activity(subghz->subghz_receiver, subghz->txrx);
     subghz_scene_receiver_dual_update_statusbar(subghz);
 
     subghz_view_receiver_set_dual_dashboard(
@@ -317,6 +329,10 @@ bool subghz_scene_receiver_dual_on_event(void* context, SceneManagerEvent event)
             notification_message(subghz->notifications, &sequence_display_backlight_off);
             consumed = true;
             break;
+        case SubGhzCustomEventSceneSettingLock:
+            subghz_lock(subghz);
+            consumed = true;
+            break;
         case SubGhzCustomEventViewReceiverUnlock:
             subghz_unlock(subghz);
             consumed = true;
@@ -326,14 +342,7 @@ bool subghz_scene_receiver_dual_on_event(void* context, SceneManagerEvent event)
         }
     } else if(event.type == SceneManagerEventTypeTick) {
         subghz_scene_receiver_dual_present_pending(subghz);
-        if(subghz_view_receiver_get_dual_dashboard(subghz->subghz_receiver)) {
-            SubGhzThresholdRssiData rssi_int = subghz_threshold_get_rssi_data(
-                subghz->threshold_rssi, subghz_txrx_dual_get_rssi_int(subghz->txrx));
-            subghz_receiver_rssi(subghz->subghz_receiver, rssi_int.rssi, NAN);
-            SubGhzThresholdRssiData rssi_ext = subghz_threshold_get_rssi_data(
-                subghz->threshold_rssi, subghz_txrx_dual_get_rssi_ext(subghz->txrx));
-            subghz_view_receiver_rssi_ext(subghz->subghz_receiver, rssi_ext.rssi);
-        }
+        subghz_view_receiver_update_activity(subghz->subghz_receiver, subghz->txrx);
 
         switch(subghz->state_notifications) {
         case SubGhzNotificationStateRx:
@@ -356,6 +365,7 @@ bool subghz_scene_receiver_dual_on_event(void* context, SceneManagerEvent event)
 
 void subghz_scene_receiver_dual_on_exit(void* context) {
     SubGhz* subghz = context;
+    subghz_txrx_activity_stop(subghz->txrx);
     subghz_txrx_dual_rx_stop(subghz->txrx);
     subghz_txrx_dual_set_rx_callback(subghz->txrx, NULL, NULL, subghz);
     subghz_view_receiver_set_dual(subghz->subghz_receiver, false, NULL, NULL);

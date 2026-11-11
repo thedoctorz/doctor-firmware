@@ -199,6 +199,10 @@ void subghz_scene_decode_raw_on_enter(void* context) {
 
     if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneDecodeRAW) ==
        SubGhzDecodeRawStateStart) {
+        SubGhzReceiver* receiver = subghz_txrx_get_receiver(subghz->txrx);
+        subghz_receiver_prepare_session(receiver, 0);
+        subghz_receiver_set_gate(receiver, 0);
+
         //Decode RAW to history
         subghz_history_reset(subghz->history);
         if(subghz_scene_decode_raw_start(subghz)) {

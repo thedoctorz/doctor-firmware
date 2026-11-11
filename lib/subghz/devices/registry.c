@@ -4,6 +4,10 @@
 #include <flipper_application/plugins/plugin_manager.h>
 #include <loader/firmware_api/firmware_api.h>
 
+#ifdef SUBGHZ_CC1101_EXT_BUILTIN
+extern const SubGhzDevice subghz_device_cc1101_ext;
+#endif
+
 #define TAG "SubGhzDeviceRegistry"
 
 #define SUBGHZ_DEVICE_REGISTRY_PLUGIN_MAX 4
@@ -17,6 +21,9 @@ struct SubGhzDeviceRegistry {
     FuriMutex* mutex;
     SubGhzDeviceRegistryPlugin plugins[SUBGHZ_DEVICE_REGISTRY_PLUGIN_MAX];
     size_t plugin_count;
+#ifdef SUBGHZ_CC1101_EXT_BUILTIN
+    bool cc1101_loaded;
+#endif
 };
 
 static SubGhzDeviceRegistry* subghz_device_registry = NULL;
@@ -40,6 +47,10 @@ void subghz_device_registry_deinit(void) {
 
 static const SubGhzDevice* subghz_device_registry_find(const char* name) {
     if(strcmp(name, subghz_device_cc1101_int.name) == 0) return &subghz_device_cc1101_int;
+#ifdef SUBGHZ_CC1101_EXT_BUILTIN
+    if(subghz_device_registry->cc1101_loaded && strcmp(name, subghz_device_cc1101_ext.name) == 0)
+        return &subghz_device_cc1101_ext;
+#endif
     for(size_t i = 0; i < subghz_device_registry->plugin_count; i++) {
         if(strcmp(name, subghz_device_registry->plugins[i].device->name) == 0) {
             return subghz_device_registry->plugins[i].device;
@@ -49,6 +60,12 @@ static const SubGhzDevice* subghz_device_registry_find(const char* name) {
 }
 
 static const SubGhzDevice* subghz_device_registry_load(const char* name) {
+#ifdef SUBGHZ_CC1101_EXT_BUILTIN
+    if(strcmp(name, subghz_device_cc1101_ext.name) == 0) {
+        subghz_device_registry->cc1101_loaded = true;
+        return &subghz_device_cc1101_ext;
+    }
+#endif
     if(subghz_device_registry->plugin_count >= SUBGHZ_DEVICE_REGISTRY_PLUGIN_MAX) return NULL;
 
     FuriString* path = furi_string_alloc_printf(
@@ -133,7 +150,14 @@ bool subghz_device_registry_is_connect(const char* name) {
         device = subghz_device_registry_load(name);
         if(device) {
             is_connect = subghz_device_registry_device_is_connect(device);
-            if(!is_connect) subghz_device_registry_unload_last();
+            if(!is_connect) {
+#ifdef SUBGHZ_CC1101_EXT_BUILTIN
+                if(device == &subghz_device_cc1101_ext)
+                    subghz_device_registry->cc1101_loaded = false;
+                else
+#endif
+                    subghz_device_registry_unload_last();
+            }
         }
     }
     furi_mutex_release(subghz_device_registry->mutex);
@@ -143,6 +167,12 @@ bool subghz_device_registry_is_connect(const char* name) {
 const SubGhzDevice* subghz_device_registry_get_by_index(size_t index) {
     furi_assert(subghz_device_registry);
     if(index == 0) return &subghz_device_cc1101_int;
+#ifdef SUBGHZ_CC1101_EXT_BUILTIN
+    if(subghz_device_registry->cc1101_loaded) {
+        if(index == 1) return &subghz_device_cc1101_ext;
+        index--;
+    }
+#endif
     if(index <= subghz_device_registry->plugin_count) {
         return subghz_device_registry->plugins[index - 1].device;
     }

@@ -1,7 +1,7 @@
 #include "subghz_psa_bf.h"
 
 #include "../helpers/subghz_custom_event.h"
-#include <lib/subghz/protocols/renault_v1.h>
+#include <lib/subghz/protocols/hitag2.h>
 #include <lib/subghz/protocols/psa.h>
 
 #define PSA_BF_PROGRESS_BAR_X 62

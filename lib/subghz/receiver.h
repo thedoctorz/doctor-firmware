@@ -31,6 +31,10 @@ SubGhzReceiver* subghz_receiver_alloc_init(SubGhzEnvironment* environment);
 SubGhzReceiver*
     subghz_receiver_alloc_init_ex(SubGhzEnvironment* environment, SubGhzProtocolFlag exclude_flags);
 
+SubGhzReceiver* subghz_receiver_alloc_init_session(SubGhzEnvironment* environment);
+
+void subghz_receiver_prepare_session(SubGhzReceiver* instance, SubGhzProtocolFlag gate);
+
 /**
  * Free SubGhzReceiver.
  * @param instance Pointer to a SubGhzReceiver instance
@@ -50,6 +54,8 @@ void subghz_receiver_decode(SubGhzReceiver* instance, bool level, uint32_t durat
  * @param instance Pointer to a SubGhzReceiver instance
  */
 void subghz_receiver_reset(SubGhzReceiver* instance);
+
+void subghz_receiver_decode_rssi(SubGhzReceiver* instance, float rssi);
 
 /**
  * Set a callback upon completion of successful decoding of one of the protocols.

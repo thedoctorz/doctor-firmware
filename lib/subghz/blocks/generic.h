@@ -16,32 +16,35 @@ extern "C" {
 typedef struct SubGhzBlockGeneric SubGhzBlockGeneric;
 
 struct SubGhzBlockGeneric {
-    const char* protocol_name;
     uint64_t data;
     uint64_t data_2;
     uint64_t data_3;
     uint64_t data_4;
+
+    const char* protocol_name;
     uint32_t serial;
-    uint16_t data_count_bit;
-    uint8_t btn;
     uint32_t cnt;
-    uint8_t cnt_2;
     uint32_t seed;
-    uint8_t type;
-    uint16_t crc;
-    uint8_t key_idx;
-    uint16_t validation_field;
     uint32_t encrypted;
     uint32_t decrypted;
-    uint8_t kia_version;
     uint32_t data_hi;
     uint32_t data_lo;
     uint32_t yek_hi;
     uint32_t yek_lo;
     uint32_t raw_cnt;
-    uint8_t fx;
-    uint16_t te;
     uint32_t extra;
+
+    uint16_t data_count_bit;
+    uint16_t crc;
+    uint16_t validation_field;
+    uint16_t te;
+
+    uint8_t btn;
+    uint8_t cnt_2;
+    uint8_t type;
+    uint8_t key_idx;
+    uint8_t kia_version;
+    uint8_t fx;
     uint8_t extra_bits;
     uint8_t end_byte;
 };

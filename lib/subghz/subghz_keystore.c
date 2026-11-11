@@ -27,10 +27,42 @@ typedef enum {
     SubGhzKeystoreEncryptionAES256,
 } SubGhzKeystoreEncryption;
 
+#define SUBGHZ_KEYSTORE_NAME_CHUNK_SIZE 512
+
+struct SubGhzKeystoreNameChunk {
+    SubGhzKeystoreNameChunk* next;
+    uint16_t used;
+    uint16_t size;
+    char data[];
+};
+
+static const char* subghz_keystore_name_intern(SubGhzKeystore* instance, const char* name) {
+    for
+        M_EACH(manufacture_code, instance->data, SubGhzKeyArray_t) {
+            if(strcmp(manufacture_code->name, name) == 0) return manufacture_code->name;
+        }
+
+    const size_t len = strlen(name) + 1;
+    SubGhzKeystoreNameChunk* chunk = instance->names;
+    if(chunk == NULL || (size_t)(chunk->size - chunk->used) < len) {
+        const size_t size = MAX((size_t)SUBGHZ_KEYSTORE_NAME_CHUNK_SIZE, len);
+        chunk = malloc(sizeof(SubGhzKeystoreNameChunk) + size);
+        chunk->next = instance->names;
+        chunk->used = 0;
+        chunk->size = size;
+        instance->names = chunk;
+    }
+    char* copy = &chunk->data[chunk->used];
+    memcpy(copy, name, len);
+    chunk->used += len;
+    return copy;
+}
+
 SubGhzKeystore* subghz_keystore_alloc(void) {
     SubGhzKeystore* instance = malloc(sizeof(SubGhzKeystore));
 
     SubGhzKeyArray_init(instance->data);
+    instance->names = NULL;
 
     subghz_keystore_reset_kl(instance);
 
@@ -49,10 +81,16 @@ void subghz_keystore_free(SubGhzKeystore* instance) {
 
     for
         M_EACH(manufacture_code, instance->data, SubGhzKeyArray_t) {
-            furi_string_free(manufacture_code->name);
             manufacture_code->key = 0;
         }
     SubGhzKeyArray_clear(instance->data);
+
+    while(instance->names) {
+        SubGhzKeystoreNameChunk* next = instance->names->next;
+        memset(instance->names->data, 0, instance->names->used);
+        free(instance->names);
+        instance->names = next;
+    }
 
     free(instance);
 }
@@ -62,8 +100,9 @@ static void subghz_keystore_add_key(
     const char* name,
     uint64_t key,
     uint16_t type) {
+    const char* pooled_name = subghz_keystore_name_intern(instance, name);
     SubGhzKey* manufacture_code = SubGhzKeyArray_push_raw(instance->data);
-    manufacture_code->name = furi_string_alloc_set(name);
+    manufacture_code->name = pooled_name;
     manufacture_code->key = key;
     manufacture_code->type = type;
 }
@@ -318,7 +357,7 @@ bool subghz_keystore_save(SubGhzKeystore* instance, const char* file_name, uint8
                     (uint32_t)(key->key >> 32),
                     (uint32_t)key->key,
                     key->type,
-                    furi_string_get_cstr(key->name));
+                    key->name);
                 // Verify length and align
                 furi_assert(len > 0);
                 if(len % 16 != 0) {

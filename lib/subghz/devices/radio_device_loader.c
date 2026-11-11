@@ -6,33 +6,34 @@
 #include <lib/subghz/devices/cc1101_int/cc1101_int_interconnect.h>
 #include <furi.h>
 #include <furi_hal.h>
+#include <power/power_service/power.h>
 
 #define TAG "RadioDeviceLoader"
 
 static bool radio_device_loader_otg_enabled_by_loader = false;
 
 static void radio_device_loader_power_on(void) {
-    if(furi_hal_power_is_otg_enabled()) return;
-    uint8_t attempts = 0;
-    while(!furi_hal_power_is_otg_enabled() && attempts++ < 5) {
-        furi_hal_power_enable_otg();
+    if(radio_device_loader_otg_enabled_by_loader) return;
+    Power* power = furi_record_open(RECORD_POWER);
+    if(!power_is_otg_enabled(power)) {
+        power_enable_otg(power, true);
+        radio_device_loader_otg_enabled_by_loader = true;
         furi_delay_ms(10);
     }
-    if(furi_hal_power_is_otg_enabled()) {
-        radio_device_loader_otg_enabled_by_loader = true;
-    }
+    furi_record_close(RECORD_POWER);
 }
 
 static void radio_device_loader_power_off(void) {
-    if(radio_device_loader_otg_enabled_by_loader && furi_hal_power_is_otg_enabled()) {
-        furi_hal_power_disable_otg();
-    }
+    if(!radio_device_loader_otg_enabled_by_loader) return;
+    Power* power = furi_record_open(RECORD_POWER);
+    power_enable_otg(power, false);
+    furi_record_close(RECORD_POWER);
     radio_device_loader_otg_enabled_by_loader = false;
 }
 
 bool radio_device_loader_is_connect_external(const char* name) {
     bool is_connect = false;
-    bool is_otg_enabled = furi_hal_power_is_otg_enabled();
+    bool is_otg_enabled = radio_device_loader_otg_enabled_by_loader;
 
     if(!is_otg_enabled) {
         radio_device_loader_power_on();
@@ -78,7 +79,7 @@ const SubGhzDevice* radio_device_loader_set(
     const SubGhzDevice* target_radio_device = NULL;
 
     if(radio_device_type == SubGhzRadioDeviceTypeExternalCC1101) {
-        bool otg_was_enabled = furi_hal_power_is_otg_enabled();
+        bool otg_was_enabled = radio_device_loader_otg_enabled_by_loader;
         if(!otg_was_enabled) {
             radio_device_loader_power_on();
         }

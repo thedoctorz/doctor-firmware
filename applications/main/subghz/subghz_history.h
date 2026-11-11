@@ -30,6 +30,8 @@ void subghz_history_reset(SubGhzHistory* instance);
 
 void subghz_history_delete_item(SubGhzHistory* instance, uint16_t idx);
 
+bool subghz_history_needs_memory_trim(SubGhzHistory* instance);
+
 /** Get frequency to history[idx]
  * 
  * @param instance  - SubGhzHistory instance
@@ -172,3 +174,7 @@ uint8_t subghz_history_get_source(SubGhzHistory* instance, uint16_t idx);
  */
 FlipperFormat* subghz_history_get_raw_data(SubGhzHistory* instance, uint16_t idx);
 FlipperFormat* subghz_history_get_raw_data_copy(SubGhzHistory* instance, uint16_t idx);
+
+size_t subghz_history_tx_budget(const char* protocol);
+void subghz_history_tx_release(SubGhzHistory* instance);
+void subghz_history_tx_restore(SubGhzHistory* instance);

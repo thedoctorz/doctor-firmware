@@ -12,6 +12,7 @@ void subghz_scene_start_on_enter(void* context) {
     SubGhz* subghz = context;
     subghz_scene_plugin_release(subghz, &subghz->add_manually_plugin);
     subghz_scene_plugin_release(subghz, &subghz->clean_dupes_plugin);
+    subghz_scene_plugin_release(subghz, &subghz->settings_manager_plugin);
     if(subghz->state_notifications == SubGhzNotificationStateStarting) {
         subghz->state_notifications = SubGhzNotificationStateIDLE;
     }

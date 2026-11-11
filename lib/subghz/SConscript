@@ -41,6 +41,16 @@ libenv.ApplyLibFlags()
 
 sources = libenv.GlobRecursive("*.c*")
 
+if str(env["TARGET_HW"]) == "7":
+    libenv.Append(CPPDEFINES=["SUBGHZ_CC1101_EXT_BUILTIN"])
+    driverenv = libenv.Clone()
+    driverenv.Append(CCFLAGS=["-flto", "-ffat-lto-objects"])
+    for unit in ("cc1101_ext", "cc1101_ext_interconnect"):
+        sources += driverenv.Object(
+            target="builtin_" + unit,
+            source="#/applications/drivers/subghz/cc1101_ext/" + unit + ".c",
+        )
+
 lib = libenv.StaticLibrary("${FW_LIB_NAME}", sources)
 libenv.Install("${LIB_DIST_DIR}", lib)
 Return("lib")

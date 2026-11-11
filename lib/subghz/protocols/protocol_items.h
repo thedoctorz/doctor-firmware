@@ -64,7 +64,7 @@
 #include "telcoma_edge.h"
 #include "chrysler_v0.h"
 #include "fiat_v0.h"
-#include "fiat_v1.h"
+#include "hitag2.h"
 #include "ford_v0.h"
 #include "ford_v1.h"
 #include "ford_v2.h"
@@ -79,8 +79,6 @@
 #include "kia_v7.h"
 #include "honda_v2.h"
 #include "renault_v0.h"
-#include "renault_v1.h"
-#include "fiat_v2.h"
 #include "honda_v1.h"
 #include "mazda_v0.h"
 #include "mazda_v2.h"
@@ -96,3 +94,6 @@
 #include "mercedes_v0.h"
 #include "toyota.h"
 #include "datsun_lada.h"
+
+
+#include "bin_raw.h"

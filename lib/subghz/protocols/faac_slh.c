@@ -137,7 +137,7 @@ static uint64_t subghz_protocol_faac_slh_get_key(
     for
         M_EACH(manufacture_code, *subghz_keystore_get_data(keystore), SubGhzKeyArray_t) {
             if(manufacture_code->type != KEELOQ_LEARNING_FAAC) continue;
-            const char* name = furi_string_get_cstr(manufacture_code->name);
+            const char* name = manufacture_code->name;
             if(strcmp(name, wanted) == 0) {
                 *manufacture_name = name;
                 return manufacture_code->key;

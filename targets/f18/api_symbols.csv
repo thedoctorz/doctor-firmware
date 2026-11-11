@@ -1,5 +1,5 @@
 entry,status,name,type,params
-Version,+,88.4,,
+Version,+,88.5,,
 Header,+,applications/services/bt/bt_service/bt.h,,
 Header,+,applications/services/bt/bt_service/bt_keys_storage.h,,
 Header,+,applications/services/cli/cli.h,,
@@ -2699,6 +2699,7 @@ Function,-,strerror,char*,int
 Function,-,strerror_l,char*,"int, locale_t"
 Function,-,strerror_r,char*,"int, char*, size_t"
 Function,+,string_stream_alloc,Stream*,
+Function,+,string_stream_shrink_to_fit,void,Stream*
 Function,+,strint_to_int16,StrintParseError,"const char*, char**, int16_t*, uint8_t"
 Function,+,strint_to_int32,StrintParseError,"const char*, char**, int32_t*, uint8_t"
 Function,+,strint_to_int64,StrintParseError,"const char*, char**, int64_t*, uint8_t"

@@ -89,7 +89,7 @@ static bool subghz_protocol_encoder_dooya_get_upload(void* context) {
     furi_assert(instance);
 
     size_t index = 0;
-    size_t size_upload = (instance->generic.data_count_bit * 2) + 2;
+    size_t size_upload = (instance->generic.data_count_bit * 2) + 3;
     if(size_upload > instance->encoder.size_upload) {
         FURI_LOG_E(TAG, "Size upload exceeds allocated encoder buffer.");
         return false;

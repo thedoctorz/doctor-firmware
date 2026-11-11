@@ -391,6 +391,7 @@ void subghz_protocol_decoder_secplus_v1_feed(void* context, bool level, uint32_t
             if(DURATION_DIFF(duration, subghz_protocol_secplus_v1_const.te_short) <
                subghz_protocol_secplus_v1_const.te_delta) {
                 instance->base_packet_index = SECPLUS_V1_PACKET_1_INDEX_BASE;
+                instance->packet_accepted &= ~SECPLUS_V1_PACKET_1_ACCEPTED;
                 instance
                     ->data_array[instance->decoder.decode_count_bit + instance->base_packet_index] =
                     SECPLUS_V1_BIT_0;
@@ -400,6 +401,7 @@ void subghz_protocol_decoder_secplus_v1_feed(void* context, bool level, uint32_t
                 DURATION_DIFF(duration, subghz_protocol_secplus_v1_const.te_long) <
                 subghz_protocol_secplus_v1_const.te_delta) {
                 instance->base_packet_index = SECPLUS_V1_PACKET_2_INDEX_BASE;
+                instance->packet_accepted &= ~SECPLUS_V1_PACKET_2_ACCEPTED;
                 instance
                     ->data_array[instance->decoder.decode_count_bit + instance->base_packet_index] =
                     SECPLUS_V1_BIT_2;
@@ -429,6 +431,7 @@ void subghz_protocol_decoder_secplus_v1_feed(void* context, bool level, uint32_t
 
                         if(instance->base.callback)
                             instance->base.callback(&instance->base, instance->base.context);
+                        instance->packet_accepted = 0;
                         instance->decoder.parser_step = SecPlus_v1DecoderStepReset;
                     }
                 }
@@ -446,36 +449,23 @@ void subghz_protocol_decoder_secplus_v1_feed(void* context, bool level, uint32_t
     case SecPlus_v1DecoderStepDecoderData:
         if(level && (instance->decoder.decode_count_bit <=
                      subghz_protocol_secplus_v1_const.min_count_bit_for_found)) {
-            if((DURATION_DIFF(
-                    instance->decoder.te_last, subghz_protocol_secplus_v1_const.te_short * 3) <
-                subghz_protocol_secplus_v1_const.te_delta * 3) &&
-               (DURATION_DIFF(duration, subghz_protocol_secplus_v1_const.te_short) <
-                subghz_protocol_secplus_v1_const.te_delta)) {
+            const uint32_t te = subghz_protocol_secplus_v1_const.te_short;
+            const uint32_t period = instance->decoder.te_last + duration;
+            int8_t bit = SECPLUS_V1_BIT_ERR;
+            if((DURATION_DIFF(period, te * 4) < subghz_protocol_secplus_v1_const.te_delta * 3) &&
+               (instance->decoder.te_last >= te / 2) && (duration >= te / 2)) {
+                if(duration < te * 3 / 2) {
+                    bit = SECPLUS_V1_BIT_0;
+                } else if(duration < te * 5 / 2) {
+                    bit = SECPLUS_V1_BIT_1;
+                } else {
+                    bit = SECPLUS_V1_BIT_2;
+                }
+            }
+            if(bit != SECPLUS_V1_BIT_ERR) {
                 instance
                     ->data_array[instance->decoder.decode_count_bit + instance->base_packet_index] =
-                    SECPLUS_V1_BIT_0;
-                instance->decoder.decode_count_bit++;
-                instance->decoder.parser_step = SecPlus_v1DecoderStepSaveDuration;
-            } else if(
-                (DURATION_DIFF(
-                     instance->decoder.te_last, subghz_protocol_secplus_v1_const.te_short * 2) <
-                 subghz_protocol_secplus_v1_const.te_delta * 2) &&
-                (DURATION_DIFF(duration, subghz_protocol_secplus_v1_const.te_short * 2) <
-                 subghz_protocol_secplus_v1_const.te_delta * 2)) {
-                instance
-                    ->data_array[instance->decoder.decode_count_bit + instance->base_packet_index] =
-                    SECPLUS_V1_BIT_1;
-                instance->decoder.decode_count_bit++;
-                instance->decoder.parser_step = SecPlus_v1DecoderStepSaveDuration;
-            } else if(
-                (DURATION_DIFF(
-                     instance->decoder.te_last, subghz_protocol_secplus_v1_const.te_short) <
-                 subghz_protocol_secplus_v1_const.te_delta) &&
-                (DURATION_DIFF(duration, subghz_protocol_secplus_v1_const.te_short * 3) <
-                 subghz_protocol_secplus_v1_const.te_delta * 3)) {
-                instance
-                    ->data_array[instance->decoder.decode_count_bit + instance->base_packet_index] =
-                    SECPLUS_V1_BIT_2;
+                    bit;
                 instance->decoder.decode_count_bit++;
                 instance->decoder.parser_step = SecPlus_v1DecoderStepSaveDuration;
             } else {

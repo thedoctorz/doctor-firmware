@@ -192,28 +192,18 @@ static void psa_get_string_setup_editor(
 
 #define TAG "PSAProtocol"
 
+#define PSA_FRAME_BITS 80U
+
 static const SubGhzBlockConst subghz_protocol_psa_const = {
     .te_short = 250,
     .te_long = 500,
     .te_delta = 100,
-    .min_count_bit_for_found = 128,
+    .min_count_bit_for_found = PSA_FRAME_BITS,
 };
 
-#define PSA_TE_SHORT_125        0x7d
 #define PSA_TE_LONG_250         0xfa
 #define PSA_TE_END_1000         1000
-#define PSA_TE_END_500          500
-#define PSA_TOLERANCE_99        99
-#define PSA_TOLERANCE_100       100
-#define PSA_TOLERANCE_49        0x31
-#define PSA_TOLERANCE_50        0x32
-#define PSA_PATTERN_THRESHOLD_1 0x46
-#define PSA_PATTERN_THRESHOLD_2 0x45
-#define PSA_MAX_BITS            0x79
-#define PSA_KEY1_BITS           0x40
-#define PSA_KEY2_BITS           0x50
 #define PSA_BUFFER_SIZE         48
-#define PSA_TE_LONG_300         0x12c
 #define PSA_UPLOAD_CAPACITY     325U
 #define TEA_DELTA               0x9E3779B9U
 #define TEA_ROUNDS              32
@@ -293,6 +283,10 @@ struct SubGhzProtocolDecoderPSA {
     uint8_t mode_serialize;
 
     uint16_t pattern_counter;
+    uint16_t timing_sum;
+    uint16_t timing_short;
+    uint8_t timing_samples;
+    uint8_t invalid_pulses;
     ManchesterState manchester_state;
 
     uint8_t decrypted_button;
@@ -787,14 +781,6 @@ static uint32_t psa_abs_diff(uint32_t a, uint32_t b) {
     }
 }
 
-static bool psa_is_te_125_short(uint32_t duration) {
-    return psa_abs_diff(duration, PSA_TE_SHORT_125) <= PSA_TOLERANCE_49;
-}
-
-static bool psa_is_te_125_long(uint32_t duration) {
-    return psa_abs_diff(duration, PSA_TE_LONG_250) <= PSA_TOLERANCE_49;
-}
-
 static void psa_setup_byte_buffer(
     uint8_t* buffer,
     uint32_t key1_low,
@@ -923,7 +909,7 @@ static void psa_extract_fields_mode23(uint8_t* buffer, SubGhzProtocolDecoderPSA*
     instance->decrypted_counter = (uint32_t)buffer[6] | ((uint32_t)buffer[5] << 8);
     instance->decrypted_crc = (uint16_t)buffer[7];
     instance->decrypted_type = 0x23;
-    instance->decrypted_seed = instance->decrypted_serial;
+    instance->decrypted_seed = ((uint32_t)(buffer[8] & 0xF0) << 4) | buffer[9];
 }
 
 static void psa_extract_fields_mode36(uint8_t* buffer, SubGhzProtocolDecoderPSA* instance) {
@@ -994,8 +980,8 @@ static bool psa_brute_force_decrypt_bf2(
 
             uint8_t crc_buffer[6] = {
                 (uint8_t)((dec_v0 >> 24) & 0xFF),
-                (uint8_t)((dec_v0 >> 8) & 0xFF),
                 (uint8_t)((dec_v0 >> 16) & 0xFF),
+                (uint8_t)((dec_v0 >> 8) & 0xFF),
                 (uint8_t)(dec_v0 & 0xFF),
                 (uint8_t)((dec_v1 >> 24) & 0xFF),
                 (uint8_t)((dec_v1 >> 16) & 0xFF),
@@ -1097,8 +1083,8 @@ void psa_brute_force_run(PsaBfState* state) {
             psa_unpack_tea_result_to_buffer(buffer, dec_v0, dec_v1);
             uint8_t crc_buffer[6] = {
                 (uint8_t)((dec_v0 >> 24) & 0xFF),
-                (uint8_t)((dec_v0 >> 8) & 0xFF),
                 (uint8_t)((dec_v0 >> 16) & 0xFF),
+                (uint8_t)((dec_v0 >> 8) & 0xFF),
                 (uint8_t)(dec_v0 & 0xFF),
                 (uint8_t)((dec_v1 >> 24) & 0xFF),
                 (uint8_t)((dec_v1 >> 16) & 0xFF),
@@ -1209,24 +1195,6 @@ static bool psa_direct_xor_decrypt(SubGhzProtocolDecoderPSA* instance, uint8_t* 
     return false;
 }
 
-static void psa_handle_decoded_frame(SubGhzProtocolDecoderPSA* instance, uint8_t direct_xor_mode);
-
-static bool psa_try_complete_at_key2(SubGhzProtocolDecoderPSA* instance, uint8_t direct_xor_mode) {
-    if(instance->decode_count_bit != PSA_KEY2_BITS) {
-        return false;
-    }
-    if(((instance->key1_high >> 16) & 0xF) != 0xA) {
-        instance->decode_data_low = 0;
-        instance->decode_data_high = 0;
-        instance->decode_count_bit = 0;
-        instance->state = PSADecoderState0;
-        return true;
-    }
-    psa_handle_decoded_frame(instance, direct_xor_mode);
-    instance->state = PSADecoderState0;
-    return true;
-}
-
 static void psa_handle_decoded_frame(SubGhzProtocolDecoderPSA* instance, uint8_t direct_xor_mode) {
     instance->key2_low = instance->decode_data_low;
     instance->key2_high = instance->decode_data_high;
@@ -1252,28 +1220,9 @@ static void psa_handle_decoded_frame(SubGhzProtocolDecoderPSA* instance, uint8_t
         instance->mode_serialize = 0x36;
     }
 
-    bool publish = (instance->decrypted == 0x50);
-    if(!publish) {
-        const uint64_t key1 = ((uint64_t)instance->key1_high << 32) | instance->key1_low;
-        const uint8_t marker_byte = (uint8_t)((instance->key1_high >> 16) & 0xFFU);
-        const uint8_t key2_high_byte = (uint8_t)(instance->key2_low >> 8);
-        if(!psa_direct_xor_allowed_by_key2(key2_high_byte) &&
-           !subghz_protocol_blocks_key_is_degenerate(key1, 64) && (marker_byte != 0xAAU) &&
-           (marker_byte != 0x55U) && (marker_byte != 0x00U) && (marker_byte != 0xFFU)) {
-            publish = true;
-        }
-    }
-
-    if(publish && instance->base.callback) {
+    if(instance->base.callback) {
         instance->base.callback(&instance->base, instance->base.context);
     }
-    instance->decode_data_low = 0;
-    instance->decode_data_high = 0;
-    instance->decode_count_bit = 0;
-    instance->state = PSADecoderState0;
-    instance->pattern_counter = 0;
-    manchester_advance(
-        instance->manchester_state, ManchesterEventReset, &instance->manchester_state, NULL);
 }
 
 static void psa_decrypt_router(SubGhzProtocolDecoderPSA* instance, bool allow_bruteforce) {
@@ -1381,18 +1330,13 @@ void subghz_protocol_decoder_psa_free(void* context) {
 void subghz_protocol_decoder_psa_reset(void* context) {
     furi_check(context);
     SubGhzProtocolDecoderPSA* instance = context;
-    instance->state = 0;
+    instance->state = PSADecoderState0;
     instance->status_flag = 0;
     instance->mode_serialize = 0;
     instance->key1_low = 0;
     instance->key1_high = 0;
     instance->key2_low = 0;
     instance->key2_high = 0;
-    instance->decode_data_low = 0;
-    instance->decode_data_high = 0;
-    instance->decode_count_bit = 0;
-    instance->pattern_counter = 0;
-    instance->manchester_state = ManchesterStateMid1;
     instance->decrypted_button = 0;
     instance->decrypted_serial = 0;
     instance->decrypted_counter = 0;
@@ -1401,378 +1345,138 @@ void subghz_protocol_decoder_psa_reset(void* context) {
     instance->decrypted_type = 0;
     instance->decrypted = 0;
     instance->validation_field = 0;
-    instance->prev_duration = 0;
 }
 
 void subghz_protocol_decoder_psa_feed(void* context, bool level, uint32_t duration) {
     furi_check(context);
     SubGhzProtocolDecoderPSA* instance = context;
-
-    uint32_t tolerance;
-    uint32_t new_state = instance->state;
-    uint32_t prev_dur = instance->prev_duration;
-    uint32_t te_short = subghz_protocol_psa_const.te_short;
-    uint32_t te_long = subghz_protocol_psa_const.te_long;
-
     switch(instance->state) {
     case PSADecoderState0:
-        if(!level) {
+        if(!level) return;
+        if(psa_abs_diff(duration, 250) <= 99) {
+            instance->state = PSADecoderState1;
+        } else if(duration < 250 && psa_abs_diff(duration, 125) <= 49) {
+            instance->state = PSADecoderState3;
+        } else {
             return;
         }
-
-        if(duration < te_short) {
-            tolerance = te_short - duration;
-            if(tolerance > PSA_TOLERANCE_99) {
-                if(!psa_is_te_125_short(duration)) {
-                    return;
-                }
-                new_state = PSADecoderState3;
-            } else {
-                new_state = PSADecoderState1;
-            }
-        } else {
-            tolerance = duration - te_short;
-            if(tolerance > PSA_TOLERANCE_99) {
-                return;
-            }
-            new_state = PSADecoderState1;
-        }
-
         instance->decode_data_low = 0;
         instance->decode_data_high = 0;
-        instance->pattern_counter = 0;
         instance->decode_count_bit = 0;
+        instance->pattern_counter = 0;
+        instance->timing_sum = 0;
+        instance->timing_samples = 0;
         instance->mode_serialize = 0;
         instance->prev_duration = duration;
-        instance->decrypted_type = 0;
-        instance->decrypted_button = 0;
-        instance->decrypted_serial = 0;
-        instance->decrypted_counter = 0;
-        instance->decrypted_crc = 0;
-        instance->decrypted_seed = 0;
-        instance->decrypted = 0x00;
         manchester_advance(
             instance->manchester_state, ManchesterEventReset, &instance->manchester_state, NULL);
-        break;
+        return;
 
     case PSADecoderState1:
-        if(level) {
+    case PSADecoderState3: {
+        if(level) return;
+        const uint32_t nominal = instance->state == PSADecoderState1 ? 250 : 125;
+        const uint32_t tolerance = instance->state == PSADecoderState1 ? 99 : 49;
+        if(psa_abs_diff(duration, nominal) <= tolerance) {
+            if(psa_abs_diff(instance->prev_duration, nominal) > tolerance) {
+                instance->state = PSADecoderState0;
+                return;
+            }
+            instance->pattern_counter++;
+            if(instance->timing_samples < 32) {
+                instance->timing_sum += duration;
+                instance->timing_samples++;
+            }
             return;
         }
-
-        if(duration < te_short) {
-            tolerance = te_short - duration;
-            if(tolerance < PSA_TOLERANCE_100) {
-                uint32_t prev_diff = psa_abs_diff(prev_dur, te_short);
-                if(prev_diff <= PSA_TOLERANCE_99) {
-                    instance->pattern_counter++;
-                }
-                instance->prev_duration = duration;
-                return;
-            }
-        } else {
-            tolerance = duration - te_short;
-            if(tolerance < PSA_TOLERANCE_100) {
-                uint32_t prev_diff = psa_abs_diff(prev_dur, te_short);
-                if(prev_diff <= PSA_TOLERANCE_99) {
-                    instance->pattern_counter++;
-                }
-                instance->prev_duration = duration;
-                return;
-            } else {
-                uint32_t long_diff;
-                if(duration < te_long) {
-                    long_diff = te_long - duration;
-                } else {
-                    long_diff = duration - te_long;
-                }
-                if(long_diff < 100) {
-                    if(instance->pattern_counter >= PSA_PATTERN_THRESHOLD_1) {
-                        new_state = PSADecoderState2;
-                        instance->decode_data_low = 0;
-                        instance->decode_data_high = 0;
-                        instance->decode_count_bit = 0;
-                        manchester_advance(
-                            instance->manchester_state,
-                            ManchesterEventReset,
-                            &instance->manchester_state,
-                            NULL);
-                        instance->state = new_state;
-                    }
-                    instance->pattern_counter = 0;
-                    instance->prev_duration = duration;
-                    return;
-                }
-            }
+        if(duration < nominal || psa_abs_diff(duration, nominal * 2) > tolerance) {
+            instance->state = PSADecoderState0;
+            return;
         }
-
-        new_state = PSADecoderState0;
+        if(instance->pattern_counter > 15) {
+            instance->state = instance->state == PSADecoderState1 ? PSADecoderState2 :
+                                                                  PSADecoderState4;
+            instance->timing_short = instance->timing_samples ?
+                                         instance->timing_sum / instance->timing_samples :
+                                         nominal;
+            instance->decode_data_low = 0;
+            instance->decode_data_high = 0;
+            instance->decode_count_bit = 0;
+            instance->invalid_pulses = 0;
+            manchester_advance(
+                instance->manchester_state,
+                ManchesterEventReset,
+                &instance->manchester_state,
+                NULL);
+        }
         instance->pattern_counter = 0;
-        break;
+        return;
+    }
 
     case PSADecoderState2:
-        if(instance->decode_count_bit >= PSA_MAX_BITS) {
-            new_state = PSADecoderState0;
-            break;
-        }
-
-        if(level && instance->decode_count_bit == PSA_KEY2_BITS) {
-            if(duration >= 800) {
-                uint32_t end_diff;
-                if(duration < PSA_TE_END_1000) {
-                    end_diff = PSA_TE_END_1000 - duration;
-                } else {
-                    end_diff = duration - PSA_TE_END_1000;
-                }
-                if(end_diff <= 199) {
-                    if(psa_try_complete_at_key2(instance, 1)) {
-                        return;
-                    }
-                    return;
-                }
-            }
-        }
-
-        uint8_t manchester_input = 0;
-        bool should_process = false;
-
-        if(duration < te_short) {
-            tolerance = te_short - duration;
-            if(tolerance >= PSA_TOLERANCE_100) {
-                return;
-            }
-            manchester_input = ((level ^ 1) & 0x7f) << 1;
-            should_process = true;
-        } else {
-            tolerance = duration - te_short;
-            if(tolerance < PSA_TOLERANCE_100) {
-                manchester_input = ((level ^ 1) & 0x7f) << 1;
-                should_process = true;
-            } else if(duration < te_long) {
-                uint32_t diff_from_250 = duration - te_short;
-                uint32_t diff_from_500 = te_long - duration;
-
-                if(diff_from_500 < 150 || diff_from_250 > diff_from_500) {
-                    if(level == 0) {
-                        manchester_input = 6;
-                    } else {
-                        manchester_input = 4;
-                    }
-                    should_process = true;
-                } else if(diff_from_250 < 150) {
-                    manchester_input = ((level ^ 1) & 0x7f) << 1;
-                    should_process = true;
-                } else {
-                    if(duration > 10000) {
-                        new_state = PSADecoderState0;
-                        instance->pattern_counter = 0;
-                        return;
-                    }
-                    if(duration >= 350 && duration <= 400) {
-                        if(level == 0) {
-                            manchester_input = 6;
-                        } else {
-                            manchester_input = 4;
-                        }
-                        should_process = true;
-                    } else {
-                        return;
-                    }
-                }
-            } else {
-                uint32_t long_diff = duration - te_long;
-                if(long_diff < 100) {
-                    if(level == 0) {
-                        manchester_input = 6;
-                    } else {
-                        manchester_input = 4;
-                    }
-                    should_process = true;
-                } else {
-                    if(!level) {
-                        if(duration > 10000) {
-                            new_state = PSADecoderState0;
-                            instance->pattern_counter = 0;
-                            return;
-                        }
-                        return;
-                    }
-                    should_process = false;
-                }
-            }
-        }
-
-        if(should_process && instance->decode_count_bit < PSA_KEY2_BITS) {
-            bool decoded_bit = false;
-
-            if(manchester_advance(
-                   instance->manchester_state,
-                   (ManchesterEvent)manchester_input,
-                   &instance->manchester_state,
-                   &decoded_bit)) {
-                uint32_t carry = (instance->decode_data_low >> 31) & 1;
-                instance->decode_data_low = (instance->decode_data_low << 1) |
-                                            (decoded_bit ? 1 : 0);
-                instance->decode_data_high = (instance->decode_data_high << 1) | carry;
-                instance->decode_count_bit++;
-
-                if(instance->decode_count_bit == PSA_KEY1_BITS) {
-                    instance->key1_low = instance->decode_data_low;
-                    instance->key1_high = instance->decode_data_high;
-                    instance->decode_data_low = 0;
-                    instance->decode_data_high = 0;
-                } else if(instance->decode_count_bit == PSA_KEY2_BITS) {
-                    if(psa_try_complete_at_key2(instance, 1)) {
-                        return;
-                    }
-                }
-            }
-        }
-
-        if(!level) {
+    case PSADecoderState4: {
+        if(instance->decode_count_bit > 120) {
+            instance->state = PSADecoderState0;
             return;
         }
-
-        if(!should_process) {
-            uint32_t end_diff;
-            if(duration < PSA_TE_END_1000) {
-                end_diff = PSA_TE_END_1000 - duration;
-            } else {
-                end_diff = duration - PSA_TE_END_1000;
-            }
-            if(end_diff <= 199) {
-                if(instance->decode_count_bit != PSA_KEY2_BITS) {
-                    return;
-                }
-
-                if(psa_try_complete_at_key2(instance, 1)) {
-                    return;
-                }
-            } else {
+        const uint32_t te = instance->timing_short;
+        const uint32_t tolerance = (te * 2) / 5;
+        ManchesterEvent event;
+        if(psa_abs_diff(duration, te) < tolerance) {
+            event = level ? ManchesterEventShortLow : ManchesterEventShortHigh;
+        } else if(psa_abs_diff(duration, te * 2) < tolerance) {
+            event = level ? ManchesterEventLongLow : ManchesterEventLongHigh;
+        } else {
+            if(!level || duration < (te * 16) / 5) {
+                instance->invalid_pulses++;
+                if(instance->invalid_pulses > 2) instance->state = PSADecoderState0;
                 return;
             }
+            goto end_frame;
         }
-        break;
 
-    case PSADecoderState3:
-        if(psa_is_te_125_long(duration)) {
-            if(instance->pattern_counter >= PSA_PATTERN_THRESHOLD_2) {
-                new_state = PSADecoderState4;
+        bool bit = false;
+        if(manchester_advance(
+               instance->manchester_state, event, &instance->manchester_state, &bit)) {
+            const uint32_t carry = instance->decode_data_low >> 31;
+            instance->decode_data_low = (instance->decode_data_low << 1) | bit;
+            instance->decode_data_high = (instance->decode_data_high << 1) | carry;
+            instance->decode_count_bit++;
+            if(instance->decode_count_bit == 64) {
+                instance->key1_low = instance->decode_data_low;
+                instance->key1_high = instance->decode_data_high;
                 instance->decode_data_low = 0;
                 instance->decode_data_high = 0;
-                instance->decode_count_bit = 0;
-                manchester_advance(
-                    instance->manchester_state,
-                    ManchesterEventReset,
-                    &instance->manchester_state,
-                    NULL);
-                instance->state = new_state;
-                instance->pattern_counter = 0;
-                instance->prev_duration = duration;
-                return;
-            }
-            new_state = PSADecoderState0;
-            instance->pattern_counter = 0;
-            break;
-        }
-
-        if(psa_is_te_125_short(duration)) {
-            uint32_t prev_diff = psa_abs_diff(prev_dur, PSA_TE_SHORT_125);
-            if(prev_diff <= PSA_TOLERANCE_49) {
-                instance->pattern_counter++;
-            } else {
-                instance->pattern_counter = 0;
-            }
-            instance->prev_duration = duration;
-            return;
-        }
-
-        new_state = PSADecoderState0;
-        instance->pattern_counter = 0;
-        break;
-
-    case PSADecoderState4: {
-        if(instance->decode_count_bit >= PSA_MAX_BITS) {
-            new_state = PSADecoderState0;
-            break;
-        }
-
-        uint8_t manchester_input = 0;
-        bool should_process_125 = false;
-
-        if(psa_is_te_125_short(duration)) {
-            manchester_input = ((level ^ 1) & 0x7f) << 1;
-            should_process_125 = true;
-        } else if(psa_is_te_125_long(duration)) {
-            manchester_input = level ? 4 : 6;
-            should_process_125 = true;
-        }
-
-        if(should_process_125 && instance->decode_count_bit < PSA_KEY2_BITS) {
-            bool decoded_bit = false;
-
-            if(manchester_advance(
-                   instance->manchester_state,
-                   (ManchesterEvent)manchester_input,
-                   &instance->manchester_state,
-                   &decoded_bit)) {
-                uint32_t carry = (instance->decode_data_low >> 31) & 1;
-                instance->decode_data_low = (instance->decode_data_low << 1) |
-                                            (decoded_bit ? 1 : 0);
-                instance->decode_data_high = (instance->decode_data_high << 1) | carry;
-                instance->decode_count_bit++;
-
-                if(instance->decode_count_bit == PSA_KEY1_BITS) {
-                    instance->key1_low = instance->decode_data_low;
-                    instance->key1_high = instance->decode_data_high;
-                    instance->decode_data_low = 0;
-                    instance->decode_data_high = 0;
-                } else if(instance->decode_count_bit == PSA_KEY2_BITS) {
-                    if(psa_try_complete_at_key2(instance, 2)) {
-                        return;
-                    }
-                }
             }
         }
+        if(!level || duration < (te * 16) / 5) return;
 
-        if(!level) {
-            return;
+    end_frame:
+        if(instance->decode_count_bit == 80 && ((instance->key1_high >> 16) & 0xF) == 0xA) {
+            psa_handle_decoded_frame(instance, instance->state == PSADecoderState2 ? 1 : 2);
+            instance->decode_data_low = 0;
+            instance->decode_data_high = 0;
+            instance->decode_count_bit = 0;
         }
-
-        if(!should_process_125) {
-            uint32_t end_diff;
-            if(duration < PSA_TE_END_500) {
-                end_diff = PSA_TE_END_500 - duration;
-            } else {
-                end_diff = duration - PSA_TE_END_500;
-            }
-            if(end_diff <= 99) {
-                if(instance->decode_count_bit != PSA_KEY2_BITS) {
-                    return;
-                }
-
-                if(psa_try_complete_at_key2(instance, 2)) {
-                    return;
-                }
-            } else {
-                return;
-            }
-        }
-        break;
+        instance->state = PSADecoderState0;
+        return;
     }
+    default:
+        return;
     }
-
-    instance->state = new_state;
-    instance->prev_duration = duration;
 }
 
 uint8_t subghz_protocol_decoder_psa_get_hash_data(void* context) {
     furi_check(context);
     SubGhzProtocolDecoderPSA* instance = context;
-    const uint64_t combined_data = (((uint64_t)instance->key1_high << 32) | instance->key1_low) ^
-                                   (((uint64_t)instance->key2_high << 32) | instance->key2_low);
-    SubGhzBlockDecoder decoder = {.decode_data = combined_data, .decode_count_bit = 64};
-    return subghz_protocol_blocks_get_hash_data(&decoder, 16);
+        uint64_t key1 = ((uint64_t)instance->key1_high << 32) | instance->key1_low;
+    uint16_t key2 = (uint16_t)instance->key2_low;
+    uint8_t hash = (uint8_t)(key2 ^ (key2 >> 8));
+    for(size_t i = 0; i < sizeof(key1); i++) {
+        hash ^= (uint8_t)key1;
+        key1 >>= 8;
+    }
+    return hash;
 }
 
 SubGhzProtocolStatus subghz_protocol_decoder_psa_serialize(
@@ -1790,7 +1494,7 @@ SubGhzProtocolStatus subghz_protocol_decoder_psa_serialize(
                flipper_format, "Protocol", instance->base.protocol->name))
             break;
 
-        uint32_t bits = 128;
+        uint32_t bits = PSA_FRAME_BITS;
         if(!flipper_format_write_uint32(flipper_format, "Bit", &bits, 1)) break;
 
         char key1_str[20];
@@ -1876,7 +1580,7 @@ void subghz_protocol_decoder_psa_get_string(void* context, FuriString* output) {
     const uint16_t key2_value = (uint16_t)(instance->key2_low & 0xFFFF);
 
     if(instance->decrypted == 0x50 && instance->decrypted_type != 0) {
-        furi_string_cat_printf(output, "%s %ubit\r\n", instance->base.protocol->name, 128);
+        furi_string_cat_printf(output, "%s %ubit\r\n", instance->base.protocol->name, PSA_FRAME_BITS);
         furi_string_cat_printf(
             output,
             "Key1:%08lX%08lX\r\nKey2:%04X\r\n",
@@ -1915,12 +1619,13 @@ void subghz_protocol_decoder_psa_get_string(void* context, FuriString* output) {
             furi_string_cat_printf(output, "Key2:%04X", (unsigned)key2_value);
         }
     } else {
-        furi_string_cat_printf(output, "%s %ubit\r\n", instance->base.protocol->name, 128);
+        furi_string_cat_printf(output, "%s %ubit\r\n", instance->base.protocol->name, PSA_FRAME_BITS);
         furi_string_cat_printf(
             output,
             "Key1:%08lX%08lX\r\nKey2:%04X\r\n",
             (unsigned long)instance->key1_high,
             (unsigned long)instance->key1_low,
             (unsigned)key2_value);
+        furi_string_cat_printf(output, "Encrypted (BF needed)");
     }
 }

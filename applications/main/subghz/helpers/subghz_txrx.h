@@ -21,6 +21,7 @@ typedef enum {
     SubGhzTxRxStartTxStateOk,
     SubGhzTxRxStartTxStateErrorOnlyRx,
     SubGhzTxRxStartTxStateErrorParserOthers,
+    SubGhzTxRxStartTxStateErrorNoMemory,
 } SubGhzTxRxStartTxState;
 
 /**
@@ -274,7 +275,8 @@ void subghz_txrx_speaker_set_state(SubGhzTxRx* instance, SubGhzSpeakerState stat
 SubGhzSpeakerState subghz_txrx_speaker_get_state(SubGhzTxRx* instance);
 
 /**
- * load decoder by name protocol
+ * Load a decoder for history/file details, independent of live RX.
+ * Replaces the previous details decoder. RAW instead borrows the live recorder.
  * 
  * @param instance Pointer to a SubGhzTxRx
  * @param name_protocol Name protocol
@@ -283,7 +285,8 @@ SubGhzSpeakerState subghz_txrx_speaker_get_state(SubGhzTxRx* instance);
 bool subghz_txrx_load_decoder_by_name_protocol(SubGhzTxRx* instance, const char* name_protocol);
 
 /**
- * Get decoder
+ * Get the selected details decoder (or live RAW recorder).
+ * The pointer is invalidated by loading another decoder or changing RX mode.
  * 
  * @param instance Pointer to a SubGhzTxRx
  * @return SubGhzProtocolDecoderBase* Pointer to a SubGhzProtocolDecoderBase
@@ -622,6 +625,9 @@ bool subghz_txrx_save_raw_from_key(
     SubGhzTxRx* instance,
     FlipperFormat* flipper_format,
     const char* file_path);
+
+typedef struct SubGhzHistory SubGhzHistory;
+void subghz_txrx_set_history(SubGhzTxRx* instance, SubGhzHistory* history);
 
 #ifdef __cplusplus
 }

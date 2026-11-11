@@ -1,8 +1,7 @@
 #include "../subghz_i.h"
 #include "../views/transmitter.h"
 #include <dolphin/dolphin.h>
-#include <lib/subghz/protocols/fiat_v1.h>
-#include <lib/subghz/protocols/renault_v1.h>
+#include <lib/subghz/protocols/hitag2.h>
 
 #include <lib/subghz/blocks/custom_btn.h>
 

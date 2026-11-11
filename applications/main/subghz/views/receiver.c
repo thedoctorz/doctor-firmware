@@ -1,5 +1,7 @@
 #include <lib/subghz/subghz_dual_radio_view.h>
 #include "receiver.h"
+#include "receiver_activity.h"
+#include "../helpers/subghz_txrx_activity.h"
 #include "../subghz_i.h"
 
 #include "types.h"
@@ -24,9 +26,11 @@
 #define SUBGHZ_RX_HOP_UI_MS            10
 #define SUBGHZ_RX_DELETE_FREQ_GUARD_MS 300
 
+#define SUBGHZ_RX_MENU_TIME_LEN 12
+
 typedef struct {
     FuriString* item_str;
-    FuriString* time;
+    char time[SUBGHZ_RX_MENU_TIME_LEN];
     uint8_t type;
     SubGhzHistoryButtonIcon button_icon;
 } SubGhzReceiverMenuItem;
@@ -73,6 +77,7 @@ struct SubGhzViewReceiver {
 };
 
 typedef struct {
+    bool controls_locked;
     FuriString* frequency_str;
     FuriString* preset_str;
     FuriString* history_stat_str;
@@ -89,6 +94,9 @@ typedef struct {
     SubGhzViewReceiverBarShow bar_show;
     SubGhzViewReceiverMode mode;
     uint8_t u_rssi;
+    bool activity_enabled;
+    SubGhzActivityHistory* activity;
+    SubGhzActivityHistory* activity_ext;
 
     SubGhzRadioDeviceType device_type;
 
@@ -109,6 +117,23 @@ typedef struct {
     uint8_t rssi_history[SUBGHZ_RX_RSSI_HISTORY_SIZE];
     uint8_t rssi_history_index;
 } SubGhzViewReceiverModel;
+
+static bool subghz_view_receiver_trace_list(const SubGhzViewReceiverModel* model) {
+    return model->mode == SubGhzViewReceiverModeLive && !model->dual_mode && !model->raw_rx_tx;
+}
+
+void subghz_view_receiver_update_activity(SubGhzViewReceiver* instance, SubGhzTxRx* txrx) {
+    with_view_model(
+        instance->view,
+        SubGhzViewReceiverModel * model,
+        {
+            if(!model->activity) model->activity = calloc(1, sizeof(SubGhzActivityHistory));
+            subghz_txrx_activity_read(txrx, 0, model->activity);
+            if(model->dual_mode) subghz_txrx_activity_read(txrx, 1, model->activity_ext);
+            model->activity_enabled = true;
+        },
+        true);
+}
 
 static uint8_t subghz_receiver_bar_from_span(float value, float min, float max) {
     if(value <= min) {
@@ -170,6 +195,21 @@ void subghz_view_receiver_rssi_ext(SubGhzViewReceiver* instance, float rssi) {
 void subghz_view_receiver_set_lock(SubGhzViewReceiver* subghz_receiver, bool lock) {
     furi_assert(subghz_receiver);
     subghz_receiver->lock_count = 0;
+    subghz_receiver->lock = lock;
+    bool live = false;
+    with_view_model(
+        subghz_receiver->view,
+        SubGhzViewReceiverModel * model,
+        {
+            model->controls_locked = lock;
+            live = model->mode == SubGhzViewReceiverModeLive && !model->raw_rx_tx;
+            if(live) model->bar_show = SubGhzViewReceiverBarShowDefault;
+        },
+        true);
+    if(live) {
+        furi_timer_stop(subghz_receiver->timer);
+        return;
+    }
     if(lock == true) {
         subghz_receiver->lock = lock;
         with_view_model(
@@ -242,16 +282,17 @@ static void subghz_view_receiver_update_offset(SubGhzViewReceiver* subghz_receiv
         subghz_receiver->view,
         SubGhzViewReceiverModel * model,
         {
-            size_t history_item = model->history_item;
-            uint16_t bounds = history_item > 3 ? 2 : history_item;
-
-            if(history_item > 3 && model->idx >= (int16_t)(history_item - 1)) {
-                model->list_offset = model->idx - 3;
-            } else if(model->list_offset < model->idx - bounds) {
-                model->list_offset =
-                    CLAMP(model->list_offset + 1, (int16_t)(history_item - bounds), 0);
-            } else if(model->list_offset > model->idx - bounds) {
-                model->list_offset = CLAMP(model->idx - 1, (int16_t)(history_item - bounds), 0);
+            const uint16_t rows = subghz_view_receiver_trace_list(model) ? 3 : MENU_ITEMS;
+            if(model->history_item == 0) {
+                model->idx = model->list_offset = 0;
+            } else {
+                if(model->idx >= model->history_item) model->idx = model->history_item - 1;
+                if(model->list_offset > model->idx) model->list_offset = model->idx;
+                if(model->idx >= model->list_offset + rows)
+                    model->list_offset = model->idx - rows + 1;
+                const uint16_t max_offset =
+                    model->history_item > rows ? model->history_item - rows : 0;
+                if(model->list_offset > max_offset) model->list_offset = max_offset;
             }
         },
         true);
@@ -288,8 +329,9 @@ void subghz_view_receiver_add_item_to_menu(
         {
             SubGhzReceiverMenuItem* item_menu =
                 SubGhzReceiverMenuItemArray_push_raw(model->history->data);
-            item_menu->time = furi_string_alloc_set(time);
+            strlcpy(item_menu->time, time, sizeof(item_menu->time));
             item_menu->item_str = furi_string_alloc_set(name);
+            furi_string_reserve(item_menu->item_str, 0);
             item_menu->type = type;
             item_menu->button_icon = button_icon;
             if(model->idx == model->history_item - 1) {
@@ -470,6 +512,9 @@ void subghz_view_receiver_set_dual(
         subghz_receiver->view,
         SubGhzViewReceiverModel * model,
         {
+            if(dual_mode && !model->activity_ext) {
+                model->activity_ext = calloc(1, sizeof(SubGhzActivityHistory));
+            }
             model->dual_mode = dual_mode;
             if(dual_mode) model->dual_dashboard = true;
             furi_string_set(model->dual_int_str, int_str ? int_str : "");
@@ -501,7 +546,9 @@ bool subghz_view_receiver_get_dual_dashboard(SubGhzViewReceiver* subghz_receiver
 static void
     subghz_view_receiver_draw_dual_dashboard(Canvas* canvas, SubGhzViewReceiverModel* model) {
     canvas_set_font(canvas, FontSecondary);
-    const char* count = furi_string_get_cstr(model->history_stat_str);
+    const char* count = model->mode == SubGhzViewReceiverModeLive ?
+                            "" :
+                            furi_string_get_cstr(model->history_stat_str);
     // The full list warning does not fit beside a radio label on the split dashboard.
     if(strstr(count, "RAM")) {
         count = "RAM!";
@@ -513,7 +560,7 @@ static void
         canvas,
         "I",
         furi_string_get_cstr(model->dual_int_str),
-        model->rssi_history,
+        model->activity_enabled ? NULL : model->rssi_history,
         model->rssi_history_index,
         0,
         116 - MIN(count_width, 112));
@@ -521,37 +568,38 @@ static void
         canvas,
         "E",
         furi_string_get_cstr(model->dual_ext_str),
-        model->rssi_history_ext,
+        model->activity_enabled ? NULL : model->rssi_history_ext,
         model->rssi_history_ext_index,
         33,
         120);
+    if(model->activity_enabled) {
+        subghz_receiver_activity_draw(canvas, model->activity, 13, 17);
+        subghz_receiver_activity_draw(canvas, model->activity_ext, 46, 17);
+    }
+    if(model->mode == SubGhzViewReceiverModeLive) {
+        canvas_set_color(canvas, ColorWhite);
+        canvas_draw_box(canvas, 117, 53, 10, 10);
+        canvas_set_color(canvas, ColorBlack);
+        canvas_draw_icon(canvas, 119, 55, model->controls_locked ? &I_Lock_7x8 : &I_Unlock_7x8);
+    }
     if(count[0] != '\0') {
         canvas_draw_str(canvas, 124 - count_width, 9, count);
     }
 }
 
-static void subghz_view_receiver_draw_frame(Canvas* canvas, uint16_t idx, bool scrollbar) {
+static void
+    subghz_view_receiver_draw_frame(Canvas* canvas, uint16_t idx, bool scrollbar, uint8_t top) {
     canvas_set_color(canvas, ColorBlack);
-    canvas_draw_box(canvas, 0, 0 + idx * FRAME_HEIGHT, scrollbar ? 122 : 127, FRAME_HEIGHT);
+    canvas_draw_box(canvas, 0, top + idx * FRAME_HEIGHT, scrollbar ? 122 : 127, FRAME_HEIGHT);
 
     canvas_set_color(canvas, ColorWhite);
-    canvas_draw_dot(canvas, 0, 0 + idx * FRAME_HEIGHT);
-    canvas_draw_dot(canvas, 1, 0 + idx * FRAME_HEIGHT);
-    canvas_draw_dot(canvas, 0, (0 + idx * FRAME_HEIGHT) + 1);
+    canvas_draw_dot(canvas, 0, top + idx * FRAME_HEIGHT);
+    canvas_draw_dot(canvas, 1, top + idx * FRAME_HEIGHT);
+    canvas_draw_dot(canvas, 0, (top + idx * FRAME_HEIGHT) + 1);
 
-    canvas_draw_dot(canvas, 0, (0 + idx * FRAME_HEIGHT) + 11);
-    canvas_draw_dot(canvas, scrollbar ? 121 : 126, 0 + idx * FRAME_HEIGHT);
-    canvas_draw_dot(canvas, scrollbar ? 121 : 126, (0 + idx * FRAME_HEIGHT) + 11);
-}
-
-static void subghz_view_rssi_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
-    for(uint8_t i = 1; i < model->u_rssi; i++) {
-        if(i % 5) {
-            canvas_draw_dot(canvas, 46 + i, 50);
-            canvas_draw_dot(canvas, 47 + i, 51);
-            canvas_draw_dot(canvas, 46 + i, 52);
-        }
-    }
+    canvas_draw_dot(canvas, 0, (top + idx * FRAME_HEIGHT) + 11);
+    canvas_draw_dot(canvas, scrollbar ? 121 : 126, top + idx * FRAME_HEIGHT);
+    canvas_draw_dot(canvas, scrollbar ? 121 : 126, (top + idx * FRAME_HEIGHT) + 11);
 }
 
 static void subghz_view_rssi_waveform_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
@@ -580,6 +628,18 @@ void subghz_view_receiver_set_raw_rx_tx(
                 model->raw_filename, sizeof(model->raw_filename), "%s", filename ? filename : "");
         },
         true);
+}
+
+static void
+    subghz_view_receiver_draw_lock_status(Canvas* canvas, const SubGhzViewReceiverModel* model) {
+    if(model->history_item > 0) {
+        char count[8];
+        snprintf(count, sizeof(count), "#%03u", (unsigned)model->history_item);
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str_aligned(canvas, 117, 62, AlignRight, AlignBottom, count);
+        canvas_set_font(canvas, FontSecondary);
+    }
+    canvas_draw_icon(canvas, 119, 55, model->controls_locked ? &I_Lock_7x8 : &I_Unlock_7x8);
 }
 
 void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
@@ -627,13 +687,19 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
         canvas_draw_str(canvas, 3, 62, furi_string_get_cstr(model->progress_str));
     }
 
-    bool scrollbar = model->history_item > 4;
+    const bool trace_list = subghz_view_receiver_trace_list(model);
+    const uint8_t list_top = 0;
+    const uint8_t list_rows = trace_list ? 3 : MENU_ITEMS;
+    bool scrollbar = model->history_item > list_rows;
+    if(trace_list && model->history_item && model->activity_enabled) {
+        subghz_receiver_activity_draw(canvas, model->activity, 36, 12);
+    }
     FuriString* str_buff = furi_string_alloc();
 
     if(!model->nodraw) {
         SubGhzReceiverMenuItem* item_menu;
 
-        for(size_t i = 0; i < MIN(model->history_item, MENU_ITEMS); ++i) {
+        for(size_t i = 0; i < MIN(model->history_item, list_rows); ++i) {
             size_t idx = CLAMP((uint16_t)(i + model->list_offset), model->history_item, 0);
             item_menu = SubGhzReceiverMenuItemArray_get(model->history->data, idx);
             if(item_menu == NULL) {
@@ -644,10 +710,10 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
             }
             furi_string_set(str_buff, item_menu->item_str);
             if(model->idx == idx) {
-                subghz_view_receiver_draw_frame(canvas, i, scrollbar);
+                subghz_view_receiver_draw_frame(canvas, i, scrollbar, list_top);
                 if(model->show_time) {
                     // Show time of signal one moment
-                    furi_string_set(str_buff, item_menu->time);
+                    furi_string_set_str(str_buff, item_menu->time);
                 }
             } else {
                 canvas_set_color(canvas, ColorBlack);
@@ -659,12 +725,14 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
             } else if(item_menu->button_icon == SubGhzHistoryButtonIconUnlock) {
                 item_icon = &I_Unlock_7x8;
             }
-            canvas_draw_icon(canvas, 4, 2 + i * FRAME_HEIGHT, item_icon);
-            canvas_draw_str(canvas, 15, 9 + i * FRAME_HEIGHT, furi_string_get_cstr(str_buff));
+            canvas_draw_icon(canvas, 4, list_top + 2 + i * FRAME_HEIGHT, item_icon);
+            canvas_draw_str(
+                canvas, 15, list_top + 9 + i * FRAME_HEIGHT, furi_string_get_cstr(str_buff));
             furi_string_reset(str_buff);
         }
         if(scrollbar) {
-            elements_scrollbar_pos(canvas, 128, 0, 49, model->idx, model->history_item);
+            elements_scrollbar_pos(
+                canvas, 128, list_top, list_rows * FRAME_HEIGHT, model->idx, model->history_item);
         }
     }
     furi_string_free(str_buff);
@@ -673,8 +741,12 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
 
     if(model->history_item == 0) {
         if(model->mode == SubGhzViewReceiverModeLive) {
-            subghz_dual_radio_draw_wave(
-                canvas, model->rssi_history, model->rssi_history_index, 49, 27);
+            if(model->activity_enabled) {
+                subghz_receiver_activity_draw(canvas, model->activity, 23, 27);
+            } else {
+                subghz_dual_radio_draw_wave(
+                    canvas, model->rssi_history, model->rssi_history_index, 49, 27);
+            }
             canvas_draw_line(canvas, 0, 19, 127, 19);
 
             subghz_view_receiver_draw_read_freq(
@@ -693,9 +765,6 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
         }
     }
 
-    if(model->mode == SubGhzViewReceiverModeLive && model->history_item > 0 && !model->dual_mode) {
-        subghz_view_rssi_draw(canvas, model);
-    }
     switch(model->bar_show) {
     case SubGhzViewReceiverBarShowLock:
         canvas_draw_icon(canvas, 64, 55, &I_Lock_7x8);
@@ -712,12 +781,20 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
                 "MHz");
             subghz_view_receiver_draw_live_preset(canvas, model);
         } else {
-            canvas_draw_str(canvas, 79, 62, furi_string_get_cstr(model->preset_str));
+            if(model->mode != SubGhzViewReceiverModeLive || model->history_item <= 999) {
+                canvas_draw_str(canvas, 79, 62, furi_string_get_cstr(model->preset_str));
+            }
         }
 #else
-        canvas_draw_str(canvas, 79, 62, furi_string_get_cstr(model->preset_str));
+        if(model->mode != SubGhzViewReceiverModeLive || model->history_item <= 999) {
+            canvas_draw_str(canvas, 79, 62, furi_string_get_cstr(model->preset_str));
+        }
 #endif
-        canvas_draw_str(canvas, 96, 62, furi_string_get_cstr(model->history_stat_str));
+        if(model->mode == SubGhzViewReceiverModeLive) {
+            subghz_view_receiver_draw_lock_status(canvas, model);
+        } else {
+            canvas_draw_str(canvas, 96, 62, furi_string_get_cstr(model->history_stat_str));
+        }
         canvas_set_font(canvas, FontSecondary);
         elements_bold_rounded_frame(canvas, 14, 8, 99, 48);
         elements_multiline_text(canvas, 65, 26, "To unlock\npress:");
@@ -735,7 +812,11 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
         if(model->dual_mode) {
             if(model->history_item > 0) {
                 canvas_draw_str(canvas, 44, 62, furi_string_get_cstr(model->frequency_str));
-                canvas_draw_str(canvas, 96, 62, furi_string_get_cstr(model->history_stat_str));
+                if(model->mode == SubGhzViewReceiverModeLive) {
+                    subghz_view_receiver_draw_lock_status(canvas, model);
+                } else {
+                    canvas_draw_str(canvas, 96, 62, furi_string_get_cstr(model->history_stat_str));
+                }
             }
             break;
         }
@@ -753,10 +834,14 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
             }
             subghz_view_receiver_draw_live_preset(canvas, model);
         } else {
-            canvas_draw_str(canvas, 79, 62, furi_string_get_cstr(model->preset_str));
+            if(model->mode != SubGhzViewReceiverModeLive || model->history_item <= 999) {
+                canvas_draw_str(canvas, 79, 62, furi_string_get_cstr(model->preset_str));
+            }
         }
 #else
-        canvas_draw_str(canvas, 79, 62, furi_string_get_cstr(model->preset_str));
+        if(model->mode != SubGhzViewReceiverModeLive || model->history_item <= 999) {
+            canvas_draw_str(canvas, 79, 62, furi_string_get_cstr(model->preset_str));
+        }
 #endif
         if(!big_freq_shown && model->mode == SubGhzViewReceiverModeLive && model->gps_active) {
             const uint8_t config_x = subghz_view_config_button_center_x(canvas);
@@ -773,7 +858,11 @@ void subghz_view_receiver_draw(Canvas* canvas, SubGhzViewReceiverModel* model) {
                                               0));
             subghz_view_gps_badge_draw(canvas, sats_buf, x0, 62);
         }
-        canvas_draw_str(canvas, 96, 62, furi_string_get_cstr(model->history_stat_str));
+        if(model->mode == SubGhzViewReceiverModeLive) {
+            subghz_view_receiver_draw_lock_status(canvas, model);
+        } else {
+            canvas_draw_str(canvas, 96, 62, furi_string_get_cstr(model->history_stat_str));
+        }
     } break;
     }
 }
@@ -796,6 +885,32 @@ static void subghz_view_receiver_timer_callback(void* context) {
 bool subghz_view_receiver_input(InputEvent* event, void* context) {
     furi_assert(context);
     SubGhzViewReceiver* subghz_receiver = context;
+
+    bool live = false;
+    with_view_model(
+        subghz_receiver->view,
+        SubGhzViewReceiverModel * model,
+        { live = model->mode == SubGhzViewReceiverModeLive && !model->raw_rx_tx; },
+        false);
+    if(live && subghz_receiver->lock) {
+        if(event->type == InputTypeShort) {
+            if(event->key == InputKeyBack) {
+                if(++subghz_receiver->lock_count == UNLOCK_CNT) {
+                    subghz_view_receiver_set_lock(subghz_receiver, false);
+                    subghz_receiver->callback(
+                        SubGhzCustomEventViewReceiverUnlock, subghz_receiver->context);
+                }
+            } else {
+                subghz_receiver->lock_count = 0;
+            }
+        }
+        return true;
+    }
+    if(live && event->key == InputKeyOk && event->type == InputTypeLong) {
+        subghz_view_receiver_set_lock(subghz_receiver, true);
+        subghz_receiver->callback(SubGhzCustomEventSceneSettingLock, subghz_receiver->context);
+        return true;
+    }
 
     if(subghz_receiver->lock == true) {
         with_view_model(
@@ -1018,7 +1133,6 @@ void subghz_view_receiver_exit(void* context) {
                 for
                     M_EACH(item_menu, model->history->data, SubGhzReceiverMenuItemArray_t) {
                         furi_string_free(item_menu->item_str);
-                        furi_string_free(item_menu->time);
                         item_menu->type = 0;
                     }
                 SubGhzReceiverMenuItemArray_reset(model->history->data);
@@ -1034,6 +1148,11 @@ void subghz_view_receiver_exit(void* context) {
                 model->dual_dashboard = true;
                 furi_string_reset(model->dual_int_str);
                 furi_string_reset(model->dual_ext_str);
+                free(model->activity_ext);
+                model->activity_ext = NULL;
+                model->activity_enabled = false;
+                free(model->activity);
+                model->activity = NULL;
                 model->rssi_history_index = 0;
                 model->rssi_history_ext_index = 0;
                 memset(model->rssi_history, 0, sizeof(model->rssi_history));
@@ -1075,6 +1194,7 @@ SubGhzViewReceiver* subghz_view_receiver_alloc(void) {
         subghz_receiver->view,
         SubGhzViewReceiverModel * model,
         {
+            model->controls_locked = false;
             model->frequency_str = furi_string_alloc();
             model->preset_str = furi_string_alloc();
             model->history_stat_str = furi_string_alloc();
@@ -1088,6 +1208,9 @@ SubGhzViewReceiver* subghz_view_receiver_alloc(void) {
             model->history = malloc(sizeof(SubGhzReceiverHistory));
             model->hopping_enabled = false;
             model->bin_raw_enabled = false;
+            model->activity_ext = NULL;
+            model->activity_enabled = false;
+            model->activity = NULL;
             model->rssi_history_index = 0;
             model->rssi_history_ext_index = 0;
             SubGhzReceiverMenuItemArray_init(model->history->data);
@@ -1113,6 +1236,8 @@ void subghz_view_receiver_free(SubGhzViewReceiver* subghz_receiver) {
         subghz_receiver->view,
         SubGhzViewReceiverModel * model,
         {
+            free(model->activity);
+            free(model->activity_ext);
             furi_string_free(model->frequency_str);
             furi_string_free(model->preset_str);
             furi_string_free(model->history_stat_str);
@@ -1122,7 +1247,6 @@ void subghz_view_receiver_free(SubGhzViewReceiver* subghz_receiver) {
                 for
                     M_EACH(item_menu, model->history->data, SubGhzReceiverMenuItemArray_t) {
                         furi_string_free(item_menu->item_str);
-                        furi_string_free(item_menu->time);
                         item_menu->type = 0;
                     }
                 SubGhzReceiverMenuItemArray_clear(model->history->data);
@@ -1158,7 +1282,6 @@ void subghz_view_receiver_delete_item(SubGhzViewReceiver* subghz_receiver, uint1
                 SubGhzReceiverMenuItem* item =
                     SubGhzReceiverMenuItemArray_get(model->history->data, idx);
                 furi_string_free(item->item_str);
-                furi_string_free(item->time);
                 item->type = 0;
                 SubGhzReceiverMenuItemArray_remove_v(model->history->data, idx, idx + 1);
 
@@ -1186,7 +1309,6 @@ void subghz_view_receiver_clear_menu(SubGhzViewReceiver* subghz_receiver) {
                 for
                     M_EACH(item_menu, model->history->data, SubGhzReceiverMenuItemArray_t) {
                         furi_string_free(item_menu->item_str);
-                        furi_string_free(item_menu->time);
                         item_menu->type = 0;
                     }
                 SubGhzReceiverMenuItemArray_reset(model->history->data);

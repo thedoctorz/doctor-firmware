@@ -40,8 +40,6 @@
 #define SECPLUS_V2_SYNC_86       179
 #define SECPLUS_V2_SYNC_86_DELTA 72
 
-#define SECPLUS_V2_PAIR_TIMEOUT 358
-
 #define SECPLUS_V2_ENCODER_UPLOAD_SIZE 384
 #define SECPLUS_V2_P_MASK_62           0x03FFu
 #define SECPLUS_V2_P_MASK_86           0x3FFFFu
@@ -81,6 +79,12 @@ typedef enum {
     SecPlus_v2DecoderStepReset = 0,
     SecPlus_v2DecoderStepDecoderData,
 } SecPlus_v2DecoderStep;
+
+typedef enum {
+    SecPlus_v2PacketNone = 0,
+    SecPlus_v2PacketFirstHalf,
+    SecPlus_v2PacketPair,
+} SecPlus_v2Packet;
 
 const SubGhzProtocolDecoder subghz_protocol_secplus_v2_decoder = {
     .alloc = subghz_protocol_decoder_secplus_v2_alloc,
@@ -965,31 +969,51 @@ void subghz_protocol_decoder_secplus_v2_reset(void* context) {
     secplus_v2_pin = SECPLUS_V2_PIN_UNSET;
 }
 
-static bool subghz_protocol_secplus_v2_check_packet(SubGhzProtocolDecoderSecPlus_v2* instance) {
+static bool subghz_protocol_secplus_v2_is_gap(uint32_t duration, uint8_t count_bit) {
+    if(count_bit == SECPLUS_V2_86_COUNT_BIT) {
+        return DURATION_DIFF(
+                   duration, subghz_protocol_secplus_v2_const.te_long * SECPLUS_V2_SYNC_86) <
+               subghz_protocol_secplus_v2_const.te_delta * SECPLUS_V2_SYNC_86_DELTA;
+    }
+    return DURATION_DIFF(duration, subghz_protocol_secplus_v2_const.te_long * SECPLUS_V2_SYNC_62) <
+           subghz_protocol_secplus_v2_const.te_delta * SECPLUS_V2_SYNC_62_DELTA;
+}
+
+static SecPlus_v2Packet
+    subghz_protocol_secplus_v2_check_packet(SubGhzProtocolDecoderSecPlus_v2* instance) {
     if(instance->decoder.decode_count_bit == SECPLUS_V2_86_COUNT_BIT) {
-        if((instance->decoder.decode_data >> 62) != 1) return false;
+        if((instance->decoder.decode_data >> 62) != 1) return SecPlus_v2PacketNone;
         if(instance->packet_id == 0) {
             instance->secplus_packet_1 = instance->decoder.decode_data;
             instance->secplus_packet_1_count_bit = SECPLUS_V2_86_COUNT_BIT;
-            return false;
+            return SecPlus_v2PacketFirstHalf;
         }
-        return (instance->packet_id == 1) && (instance->secplus_packet_1 != 0) &&
-               (instance->secplus_packet_1_count_bit == SECPLUS_V2_86_COUNT_BIT);
+        if((instance->packet_id != 1) || (instance->secplus_packet_1 == 0) ||
+           (instance->secplus_packet_1_count_bit != SECPLUS_V2_86_COUNT_BIT)) {
+            return SecPlus_v2PacketNone;
+        }
+        SubGhzBlockGeneric pair = instance->generic;
+        uint32_t data_word = 0;
+        return subghz_protocol_secplus_v2_remote_controller_86(
+                   &pair, instance->secplus_packet_1, &data_word) ?
+                   SecPlus_v2PacketPair :
+                   SecPlus_v2PacketNone;
     }
     if((instance->decoder.decode_data & SECPLUS_V2_HEADER_MASK) == SECPLUS_V2_HEADER) {
         if((instance->decoder.decode_data & SECPLUS_V2_PACKET_MASK) == SECPLUS_V2_PACKET_1) {
             instance->secplus_packet_1 = instance->decoder.decode_data;
             instance->secplus_packet_1_count_bit =
                 subghz_protocol_secplus_v2_const.min_count_bit_for_found;
+            return SecPlus_v2PacketFirstHalf;
         } else if(
             ((instance->decoder.decode_data & SECPLUS_V2_PACKET_MASK) == SECPLUS_V2_PACKET_2) &&
             (instance->secplus_packet_1) &&
             (instance->secplus_packet_1_count_bit ==
              subghz_protocol_secplus_v2_const.min_count_bit_for_found)) {
-            return true;
+            return SecPlus_v2PacketPair;
         }
     }
-    return false;
+    return SecPlus_v2PacketNone;
 }
 
 void subghz_protocol_decoder_secplus_v2_feed(void* context, bool level, uint32_t duration) {
@@ -1000,12 +1024,9 @@ void subghz_protocol_decoder_secplus_v2_feed(void* context, bool level, uint32_t
     switch(instance->decoder.parser_step) {
     case SecPlus_v2DecoderStepReset:
         if((!level) &&
-           ((DURATION_DIFF(
-                 duration, subghz_protocol_secplus_v2_const.te_long * SECPLUS_V2_SYNC_62) <
-             subghz_protocol_secplus_v2_const.te_delta * SECPLUS_V2_SYNC_62_DELTA) ||
-            (DURATION_DIFF(
-                 duration, subghz_protocol_secplus_v2_const.te_long * SECPLUS_V2_SYNC_86) <
-             subghz_protocol_secplus_v2_const.te_delta * SECPLUS_V2_SYNC_86_DELTA))) {
+           (subghz_protocol_secplus_v2_is_gap(
+                duration, subghz_protocol_secplus_v2_const.min_count_bit_for_found) ||
+            subghz_protocol_secplus_v2_is_gap(duration, SECPLUS_V2_86_COUNT_BIT))) {
             //Found header Security+ 2.0
             instance->decoder.parser_step = SecPlus_v2DecoderStepDecoderData;
             instance->decoder.decode_data = 0;
@@ -1041,20 +1062,22 @@ void subghz_protocol_decoder_secplus_v2_feed(void* context, bool level, uint32_t
             } else if(
                 duration >= (subghz_protocol_secplus_v2_const.te_long * 2UL +
                              subghz_protocol_secplus_v2_const.te_delta)) {
+                SecPlus_v2Packet packet = SecPlus_v2PacketNone;
                 if((instance->decoder.decode_count_bit ==
                     subghz_protocol_secplus_v2_const.min_count_bit_for_found) ||
                    (instance->decoder.decode_count_bit == SECPLUS_V2_86_COUNT_BIT)) {
                     instance->generic.data = instance->decoder.decode_data;
                     instance->generic.data_count_bit = instance->decoder.decode_count_bit;
-                    if(subghz_protocol_secplus_v2_check_packet(instance)) {
-                        if(instance->base.callback)
-                            instance->base.callback(&instance->base, instance->base.context);
-                        instance->decoder.parser_step = SecPlus_v2DecoderStepReset;
-                    }
+                    packet = subghz_protocol_secplus_v2_check_packet(instance);
                 }
-                if((instance->secplus_packet_1_count_bit == SECPLUS_V2_86_COUNT_BIT) &&
-                   (duration >
-                    (subghz_protocol_secplus_v2_const.te_long * 1UL * SECPLUS_V2_PAIR_TIMEOUT))) {
+                if(packet == SecPlus_v2PacketPair) {
+                    if(instance->base.callback)
+                        instance->base.callback(&instance->base, instance->base.context);
+                    instance->decoder.parser_step = SecPlus_v2DecoderStepReset;
+                } else if(
+                    (packet != SecPlus_v2PacketFirstHalf) ||
+                    !subghz_protocol_secplus_v2_is_gap(
+                        duration, instance->decoder.decode_count_bit)) {
                     instance->secplus_packet_1 = 0;
                     instance->secplus_packet_1_count_bit = 0;
                 }

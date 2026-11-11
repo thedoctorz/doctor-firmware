@@ -310,7 +310,7 @@ struct SubGhzProtocolDecoderMazdaV2 {
     SubGhzBlockGeneric generic;
 
     uint8_t skip_flag;
-    uint8_t samples[MAZDA_V2_SAMPLE_CAP];
+    uint8_t samples[MAZDA_V2_SAMPLE_CAP / 8];
     uint16_t sample_count;
     uint16_t short_count;
     uint64_t last_key;
@@ -599,6 +599,18 @@ static SubGhzProtocolStatus mazda_v2_write_display(
     return ok ? SubGhzProtocolStatusOk : SubGhzProtocolStatusErrorParserOthers;
 }
 
+static inline uint8_t mazda_v2_sample_get(const uint8_t* samples, int i) {
+    return (samples[i >> 3] >> (i & 7)) & 1U;
+}
+
+static inline void mazda_v2_sample_set(uint8_t* samples, int i, uint8_t level) {
+    if(level) {
+        samples[i >> 3] |= (uint8_t)(1U << (i & 7));
+    } else {
+        samples[i >> 3] &= (uint8_t) ~(1U << (i & 7));
+    }
+}
+
 static void mazda_v2_try_parse(SubGhzProtocolDecoderMazdaV2* instance) {
     const uint16_t sample_count = instance->sample_count;
     if(sample_count <= 0x46U) {
@@ -613,7 +625,7 @@ static void mazda_v2_try_parse(SubGhzProtocolDecoderMazdaV2* instance) {
         uint8_t pol = 1;
         bool fail = false;
         for(uint8_t i = 0; i < 8; i++) {
-            const uint8_t bit = samples[start + i];
+            const uint8_t bit = mazda_v2_sample_get(samples, start + i);
             const uint8_t pa = mazda_v2_pat_a[i];
             const uint8_t pb = mazda_v2_pat_b[i];
             if(bit == pa) {
@@ -649,7 +661,7 @@ static void mazda_v2_try_parse(SubGhzProtocolDecoderMazdaV2* instance) {
         int pos = start;
         while(preamble < (unsigned)start) {
             pos--;
-            if(samples[pos] == pol) {
+            if(mazda_v2_sample_get(samples, pos) == pol) {
                 preamble++;
             } else {
                 break;
@@ -661,7 +673,7 @@ static void mazda_v2_try_parse(SubGhzProtocolDecoderMazdaV2* instance) {
 
         uint64_t value = 0;
         for(uint8_t i = 0; i < 63; i++) {
-            uint8_t bit = samples[start + 8 + i];
+            uint8_t bit = mazda_v2_sample_get(samples, start + 8 + i);
             if(invert) {
                 bit ^= 1U;
             }
@@ -697,7 +709,10 @@ static void mazda_v2_try_parse(SubGhzProtocolDecoderMazdaV2* instance) {
         const int consumed = start + 0x47;
         const int leftover = (int)sample_count - consumed;
         if(leftover > 0) {
-            memmove(instance->samples, instance->samples + consumed, (size_t)leftover);
+            for(int i = 0; i < leftover; i++) {
+                mazda_v2_sample_set(
+                    instance->samples, i, mazda_v2_sample_get(instance->samples, consumed + i));
+            }
             instance->sample_count = (uint16_t)leftover;
         } else {
             instance->sample_count = 0;
@@ -725,7 +740,7 @@ static void mazda_v2_after_store(SubGhzProtocolDecoderMazdaV2* instance) {
 
 static void mazda_v2_store_sample(SubGhzProtocolDecoderMazdaV2* instance, bool level) {
     if(instance->sample_count < MAZDA_V2_SAMPLE_CAP) {
-        instance->samples[instance->sample_count] = level ? 1 : 0;
+        mazda_v2_sample_set(instance->samples, instance->sample_count, level ? 1U : 0U);
         instance->sample_count++;
     }
     mazda_v2_after_store(instance);

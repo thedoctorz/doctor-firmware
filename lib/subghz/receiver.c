@@ -1,14 +1,26 @@
 #include "receiver.h"
 
 #include "registry.h"
+#include "protocols/bin_raw.h"
 
 #include <m-array.h>
 
 typedef struct {
-    SubGhzProtocolEncoderBase* base;
+    union {
+        SubGhzProtocolEncoderBase* base;
+        const SubGhzProtocol* protocol;
+    };
+    bool allocated;
+    bool pinned;
     bool disabled;
     bool dispatched;
 } SubGhzReceiverSlot;
+
+_Static_assert(sizeof(SubGhzReceiverSlot) == 2 * sizeof(void*), "Keep receiver slots compact");
+
+static const SubGhzProtocol* subghz_receiver_slot_protocol(const SubGhzReceiverSlot* slot) {
+    return slot->allocated ? slot->base->protocol : slot->protocol;
+}
 
 typedef struct {
     void* context;
@@ -20,7 +32,9 @@ ARRAY_DEF(SubGhzReceiverSlotArray, SubGhzReceiverSlot, M_POD_OPLIST); //-V658
 
 struct SubGhzReceiver {
     SubGhzReceiverSlotArray_t slots;
+    SubGhzEnvironment* environment;
     SubGhzProtocolFlag filter;
+    SubGhzProtocolDecoderBinRAW* bin_raw;
 
     SubGhzProtocolFlag modulation;
     SubGhzProtocolFlag band;
@@ -33,6 +47,16 @@ struct SubGhzReceiver {
     void* context;
 };
 
+static void subghz_receiver_rx_callback(SubGhzProtocolDecoderBase* decoder_base, void* context);
+static SubGhzReceiver* subghz_receiver_alloc_internal(
+    SubGhzEnvironment* environment,
+    SubGhzProtocolFlag exclude_flags,
+    bool deferred);
+
+SubGhzReceiver* subghz_receiver_alloc_init_session(SubGhzEnvironment* environment) {
+    return subghz_receiver_alloc_internal(environment, 0, true);
+}
+
 SubGhzReceiver* subghz_receiver_alloc_init(SubGhzEnvironment* environment) {
     return subghz_receiver_alloc_init_ex(environment, 0);
 }
@@ -40,10 +64,28 @@ SubGhzReceiver* subghz_receiver_alloc_init(SubGhzEnvironment* environment) {
 SubGhzReceiver* subghz_receiver_alloc_init_ex(
     SubGhzEnvironment* environment,
     SubGhzProtocolFlag exclude_flags) {
+    return subghz_receiver_alloc_internal(environment, exclude_flags, false);
+}
+
+static SubGhzReceiver* subghz_receiver_alloc_internal(
+    SubGhzEnvironment* environment,
+    SubGhzProtocolFlag exclude_flags,
+    bool deferred) {
     SubGhzReceiver* instance = malloc(sizeof(SubGhzReceiver));
+    instance->environment = environment;
+    instance->bin_raw = NULL;
     SubGhzReceiverSlotArray_init(instance->slots);
     const SubGhzProtocolRegistry* protocol_registry_items =
         subghz_environment_get_protocol_registry(environment);
+
+    size_t slot_count = 0;
+    for(size_t i = 0; i < subghz_protocol_registry_count(protocol_registry_items); ++i) {
+        const SubGhzProtocol* protocol =
+            subghz_protocol_registry_get_by_index(protocol_registry_items, i);
+        if(!(protocol->flag & exclude_flags) && protocol->decoder && protocol->decoder->alloc)
+            slot_count++;
+    }
+    SubGhzReceiverSlotArray_reserve(instance->slots, slot_count);
 
     for(size_t i = 0; i < subghz_protocol_registry_count(protocol_registry_items); ++i) {
         const SubGhzProtocol* protocol =
@@ -55,7 +97,12 @@ SubGhzReceiver* subghz_receiver_alloc_init_ex(
 
         if(protocol->decoder && protocol->decoder->alloc) {
             SubGhzReceiverSlot* slot = SubGhzReceiverSlotArray_push_new(instance->slots);
-            slot->base = protocol->decoder->alloc(environment);
+            slot->protocol = protocol;
+            slot->pinned = false;
+            if(!deferred) slot->base = protocol->decoder->alloc(environment);
+            slot->allocated = !deferred;
+            if(slot->allocated && (protocol->flag & SubGhzProtocolFlag_BinRAW))
+                instance->bin_raw = (void*)slot->base;
             slot->disabled = false;
             slot->dispatched = false;
         }
@@ -73,16 +120,62 @@ SubGhzReceiver* subghz_receiver_alloc_init_ex(
     return instance;
 }
 
+// Only call with the decoder worker stopped. A lookup pins the returned instance,
+// preserving the historical pointer lifetime for file loading, editing and TX.
+void subghz_receiver_prepare_session(SubGhzReceiver* instance, SubGhzProtocolFlag gate) {
+    furi_check(instance);
+    const SubGhzProtocolFlag mod = gate & (SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM);
+    const SubGhzProtocolFlag band =
+        gate & (SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_868);
+    instance->dispatch_count = 0;
+    if(instance->bin_raw && !(instance->filter & SubGhzProtocolFlag_BinRAW))
+        subghz_protocol_decoder_bin_raw_release(instance->bin_raw);
+    for
+        M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
+            const bool bin_raw_off =
+                (subghz_receiver_slot_protocol(slot)->flag & SubGhzProtocolFlag_BinRAW) &&
+                !(instance->filter & SubGhzProtocolFlag_BinRAW);
+            const bool needed = slot->pinned ||
+                                (!bin_raw_off && !slot->disabled &&
+                                 (!mod || (subghz_receiver_slot_protocol(slot)->flag & mod)) &&
+                                 (!band || (subghz_receiver_slot_protocol(slot)->flag & band)));
+            if(!needed && slot->allocated) {
+                const SubGhzProtocol* protocol = subghz_receiver_slot_protocol(slot);
+                if(protocol->flag & SubGhzProtocolFlag_BinRAW) instance->bin_raw = NULL;
+                protocol->decoder->free(slot->base);
+                slot->protocol = protocol;
+                slot->allocated = false;
+            }
+            slot->dispatched = false;
+        }
+    for
+        M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
+            if(!slot->allocated && !slot->disabled &&
+               (!(subghz_receiver_slot_protocol(slot)->flag & SubGhzProtocolFlag_BinRAW) ||
+                (instance->filter & SubGhzProtocolFlag_BinRAW)) &&
+               (!mod || (subghz_receiver_slot_protocol(slot)->flag & mod)) &&
+               (!band || (subghz_receiver_slot_protocol(slot)->flag & band))) {
+                slot->base =
+                    subghz_receiver_slot_protocol(slot)->decoder->alloc(instance->environment);
+                slot->allocated = true;
+                if(subghz_receiver_slot_protocol(slot)->flag & SubGhzProtocolFlag_BinRAW)
+                    instance->bin_raw = (void*)slot->base;
+                subghz_protocol_decoder_base_set_decoder_callback(
+                    (SubGhzProtocolDecoderBase*)slot->base, subghz_receiver_rx_callback, instance);
+            }
+        }
+    instance->dispatch_dirty = true;
+}
+
 void subghz_receiver_free(SubGhzReceiver* instance) {
     furi_check(instance);
 
     instance->callback = NULL;
     instance->context = NULL;
 
-    // Release allocated slots
     for
         M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
-            slot->base->protocol->decoder->free(slot->base);
+            if(slot->allocated) subghz_receiver_slot_protocol(slot)->decoder->free(slot->base);
             slot->base = NULL;
         }
     SubGhzReceiverSlotArray_clear(instance->slots);
@@ -102,15 +195,16 @@ static void subghz_receiver_update_dispatch(SubGhzReceiver* instance) {
     instance->dispatch_count = 0;
     for
         M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
-            const bool dispatch = !slot->disabled &&
-                                  (slot->base->protocol->flag & filter) != 0 &&
-                                  (slot->base->protocol->flag & modulation) != 0 &&
-                                  (slot->base->protocol->flag & band) != 0;
+            const bool dispatch = slot->allocated && !slot->disabled &&
+                                  (subghz_receiver_slot_protocol(slot)->flag & filter) != 0 &&
+                                  (subghz_receiver_slot_protocol(slot)->flag & modulation) != 0 &&
+                                  (subghz_receiver_slot_protocol(slot)->flag & band) != 0;
             if(dispatch) {
-                if(!slot->dispatched) slot->base->protocol->decoder->reset(slot->base);
+                if(!slot->dispatched)
+                    subghz_receiver_slot_protocol(slot)->decoder->reset(slot->base);
                 SubGhzReceiverDispatch* entry = &instance->dispatch[instance->dispatch_count++];
                 entry->context = slot->base;
-                entry->feed = slot->base->protocol->decoder->feed;
+                entry->feed = subghz_receiver_slot_protocol(slot)->decoder->feed;
             }
             slot->dispatched = dispatch;
         }
@@ -131,7 +225,7 @@ void subghz_receiver_reset(SubGhzReceiver* instance) {
 
     for
         M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
-            slot->base->protocol->decoder->reset(slot->base);
+            if(slot->allocated) subghz_receiver_slot_protocol(slot)->decoder->reset(slot->base);
         }
 }
 
@@ -157,6 +251,7 @@ void subghz_receiver_set_rx_callback(
 
     for
         M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
+            if(!slot->allocated) continue;
             subghz_protocol_decoder_base_set_decoder_callback(
                 (SubGhzProtocolDecoderBase*)slot->base, subghz_receiver_rx_callback, instance);
         }
@@ -203,7 +298,7 @@ bool subghz_receiver_set_protocol_enabled(
 
     for
         M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
-            if(strcmp(slot->base->protocol->name, protocol_name) == 0) {
+            if(strcmp(subghz_receiver_slot_protocol(slot)->name, protocol_name) == 0) {
                 if(slot->disabled == enabled) {
                     slot->disabled = !enabled;
                     instance->dispatch_dirty = true;
@@ -230,10 +325,30 @@ SubGhzProtocolDecoderBase* subghz_receiver_search_decoder_base_by_name(
 
     for
         M_EACH(slot, instance->slots, SubGhzReceiverSlotArray_t) {
-            if(strcmp(slot->base->protocol->name, decoder_name) == 0) {
+            if(strcmp(subghz_receiver_slot_protocol(slot)->name, decoder_name) == 0) {
+                if(!slot->allocated) {
+                    slot->base =
+                        subghz_receiver_slot_protocol(slot)->decoder->alloc(instance->environment);
+                    slot->allocated = true;
+                    if(subghz_receiver_slot_protocol(slot)->flag & SubGhzProtocolFlag_BinRAW)
+                        instance->bin_raw = (void*)slot->base;
+                    subghz_protocol_decoder_base_set_decoder_callback(
+                        (SubGhzProtocolDecoderBase*)slot->base,
+                        subghz_receiver_rx_callback,
+                        instance);
+                    instance->dispatch_dirty = true;
+                }
+                slot->pinned = true;
                 result = (SubGhzProtocolDecoderBase*)slot->base;
                 break;
             }
         }
     return result;
+}
+
+void subghz_receiver_decode_rssi(SubGhzReceiver* instance, float rssi) {
+    if(instance->bin_raw && (instance->filter & SubGhzProtocolFlag_BinRAW)) {
+        if(instance->dispatch_dirty) subghz_receiver_update_dispatch(instance);
+        subghz_protocol_decoder_bin_raw_data_input_rssi(instance->bin_raw, rssi);
+    }
 }

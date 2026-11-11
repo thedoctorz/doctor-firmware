@@ -45,6 +45,12 @@ Stream* string_stream_alloc(void) {
     return (Stream*)stream;
 }
 
+void string_stream_shrink_to_fit(Stream* stream) {
+    furi_check(stream);
+    furi_check(stream->vtable == &string_stream_vtable);
+    furi_string_reserve(((StringStream*)stream)->string, 0);
+}
+
 static void string_stream_free(StringStream* stream) {
     furi_string_free(stream->string);
     free(stream);

@@ -64,7 +64,10 @@ void subghz_worker_set_context(SubGhzWorker* instance, void* context);
  */
 void subghz_worker_start(SubGhzWorker* instance);
 
-/** Stop SubGhzWorker
+void subghz_worker_set_tick_callback(SubGhzWorker* instance, SubGhzWorkerOverrunCallback callback);
+
+/** Stop accepting capture, deliver queued and pending completed pulses, then join.
+ * Stop the radio capture producer before calling this function.
  * @param instance Pointer to a SubGhzWorker instance
  */
 void subghz_worker_stop(SubGhzWorker* instance);
@@ -90,7 +93,8 @@ uint32_t subghz_worker_get_overrun_count(SubGhzWorker* instance);
 
 /**
  * Short duration filter setting.
- * glues short durations into 1. The default setting is 30 us, if set to 0 the filter will be disabled
+ * Merges short pulses before queueing. The default is 30 us; 0 preserves raw pulses.
+ * The final completed pulse is delivered after an idle timeout or during stop.
  * @param instance Pointer to a SubGhzWorker instance
  * @param timeout time in us
  */

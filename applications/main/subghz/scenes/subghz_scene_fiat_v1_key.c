@@ -1,8 +1,7 @@
 #include "../subghz_i.h"
 #include "../helpers/subghz_custom_event.h"
 #include <lib/subghz/blocks/generic.h>
-#include <lib/subghz/protocols/fiat_v1.h>
-#include <lib/subghz/protocols/renault_v1.h>
+#include <lib/subghz/protocols/hitag2.h>
 
 static char hitag2_key_text[13];
 

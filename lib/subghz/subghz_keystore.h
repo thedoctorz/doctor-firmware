@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 typedef struct {
-    FuriString* name;
     uint64_t key;
+    const char* name;
     uint16_t type;
 } SubGhzKey;
 

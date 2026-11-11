@@ -4,8 +4,9 @@
 
 #define TAG "SubGhzWorker"
 
-#define SUBGHZ_WORKER_BATCH_SAMPLES 32
+#define SUBGHZ_WORKER_BATCH_SAMPLES 32u
 #define SUBGHZ_WORKER_RUN_TICKS     10
+#define SUBGHZ_WORKER_IDLE_TICKS    10
 
 struct SubGhzWorker {
     FuriThread* thread;
@@ -30,27 +31,17 @@ struct SubGhzWorker {
     uint32_t retune_payload;
 
     LevelDuration filter_level_duration;
+    uint32_t last_capture_tick;
     uint16_t filter_duration;
 
     SubGhzWorkerOverrunCallback overrun_callback;
+    SubGhzWorkerOverrunCallback tick_callback;
     SubGhzWorkerPairCallback pair_callback;
     SubGhzWorkerBarrierCallback barrier_callback;
     void* context;
 };
 
-/** Rx callback timer
- * 
- * @param level received signal level
- * @param duration received signal duration
- * @param context 
- */
-void subghz_worker_rx_callback(bool level, uint32_t duration, void* context) {
-    SubGhzWorker* instance = context;
-
-    if(!instance->running) return;
-    instance->edge_count++;
-
-    LevelDuration level_duration = level_duration_make(level, duration);
+static void subghz_worker_enqueue(SubGhzWorker* instance, LevelDuration level_duration) {
     if(instance->overrun) {
         instance->overrun = false;
         level_duration = level_duration_reset();
@@ -67,6 +58,50 @@ void subghz_worker_rx_callback(bool level, uint32_t duration, void* context) {
     }
 }
 
+void subghz_worker_rx_callback(bool level, uint32_t duration, void* context) {
+    SubGhzWorker* instance = context;
+    if(!instance->running) return;
+    if(!duration) {
+        instance->filter_level_duration = level_duration_reset();
+        instance->overrun_count++;
+        subghz_worker_enqueue(instance, level_duration_reset());
+        return;
+    }
+    instance->edge_count++;
+    instance->last_capture_tick = furi_get_tick();
+    duration = MIN(duration, 0x3FFFFFFFU);
+    const LevelDuration sample = level_duration_make(level, duration);
+
+    if(!instance->filter_duration) {
+        if(!level_duration_is_reset(instance->filter_level_duration)) {
+            subghz_worker_enqueue(instance, instance->filter_level_duration);
+            instance->filter_level_duration = level_duration_reset();
+        }
+        subghz_worker_enqueue(instance, sample);
+    } else if(level_duration_is_reset(instance->filter_level_duration)) {
+        instance->filter_level_duration = sample;
+    } else if(
+        duration < instance->filter_duration ||
+        level_duration_get_level(instance->filter_level_duration) == level) {
+        instance->filter_level_duration.duration +=
+            MIN(0x3FFFFFFFU - instance->filter_level_duration.duration, duration);
+    } else {
+        subghz_worker_enqueue(instance, instance->filter_level_duration);
+        instance->filter_level_duration = sample;
+    }
+}
+
+static void subghz_worker_flush_pending(SubGhzWorker* instance, bool force) {
+    FURI_CRITICAL_ENTER();
+    if(!level_duration_is_reset(instance->filter_level_duration) &&
+       (force || furi_get_tick() - instance->last_capture_tick >= SUBGHZ_WORKER_IDLE_TICKS) &&
+       furi_stream_buffer_spaces_available(instance->stream) >= sizeof(LevelDuration)) {
+        subghz_worker_enqueue(instance, instance->filter_level_duration);
+        instance->filter_level_duration = level_duration_reset();
+    }
+    FURI_CRITICAL_EXIT();
+}
+
 static bool subghz_worker_retune_pending(SubGhzWorker* instance) {
     if(instance->retune_req == instance->retune_done) return false;
 
@@ -80,8 +115,6 @@ static bool subghz_worker_retune_pending(SubGhzWorker* instance) {
     if((int32_t)(until - instance->read_seq) > 0) return true;
 
     instance->retune_done = req;
-    instance->filter_level_duration.level = LEVEL_DURATION_RESET;
-    instance->filter_level_duration.duration = 0;
     if(instance->overrun_callback) instance->overrun_callback(instance->context);
     if(instance->barrier_callback) instance->barrier_callback(instance->context, payload);
     return false;
@@ -97,17 +130,28 @@ static int32_t subghz_worker_thread_callback(void* context) {
 
     LevelDuration batch[SUBGHZ_WORKER_BATCH_SAMPLES];
     uint32_t run_start = furi_get_tick();
+    uint32_t tick_stamp = run_start;
     FuriThreadPriority priority = instance->requested_priority;
     furi_thread_set_current_priority(priority);
-    while(instance->running) {
+    while(true) {
+        subghz_worker_flush_pending(instance, !instance->running);
         const FuriThreadPriority requested = instance->requested_priority;
         if(priority != requested) {
             priority = requested;
             furi_thread_set_current_priority(priority);
         }
         subghz_worker_retune_pending(instance);
-        size_t ret = furi_stream_buffer_receive(instance->stream, batch, sizeof(batch), 10);
-        for(size_t i = 0; i < ret / sizeof(LevelDuration) && instance->running; i++) {
+        size_t ret = furi_stream_buffer_receive(
+            instance->stream,
+            batch,
+            sizeof(batch),
+            instance->running ? SUBGHZ_WORKER_IDLE_TICKS : 0);
+        if(!ret && !instance->running) {
+            subghz_worker_flush_pending(instance, true);
+            if(instance->read_seq == instance->write_seq) break;
+            continue;
+        }
+        for(size_t i = 0; i < ret / sizeof(LevelDuration); i++) {
             const LevelDuration level_duration = batch[i];
             const bool stale = subghz_worker_retune_pending(instance);
             instance->read_seq++;
@@ -116,9 +160,6 @@ static int32_t subghz_worker_thread_callback(void* context) {
                 continue;
             }
             if(level_duration_is_wait(level_duration)) {
-                instance->filter_level_duration.level = LEVEL_DURATION_RESET;
-                instance->filter_level_duration.duration = 0;
-
                 if(instance->overrun_callback) instance->overrun_callback(instance->context);
 
                 if(instance->barrier_callback) {
@@ -126,8 +167,6 @@ static int32_t subghz_worker_thread_callback(void* context) {
                         instance->context, level_duration_get_duration(level_duration));
                 }
             } else if(level_duration_is_reset(level_duration)) {
-                instance->filter_level_duration.level = LEVEL_DURATION_RESET;
-                instance->filter_level_duration.duration = 0;
                 const uint32_t now = furi_get_tick();
                 if(now - instance->overrun_log_stamp >= furi_ms_to_ticks(1000)) {
                     instance->overrun_log_stamp = now;
@@ -135,33 +174,22 @@ static int32_t subghz_worker_thread_callback(void* context) {
                 }
                 if(instance->overrun_callback) instance->overrun_callback(instance->context);
             } else {
-                bool level = level_duration_get_level(level_duration);
-                uint32_t duration = level_duration_get_duration(level_duration);
-
-                if(level_duration_is_reset(instance->filter_level_duration)) {
-                    instance->filter_level_duration = level_duration;
-                } else if(
-                    (duration < instance->filter_duration) ||
-                    (level_duration_get_level(instance->filter_level_duration) == level)) {
-                    instance->filter_level_duration.duration +=
-                        MIN(0x3FFFFFFFU - instance->filter_level_duration.duration, duration);
-                } else {
-                    const uint32_t callback_start = furi_get_tick();
-                    if(instance->pair_callback)
-                        instance->pair_callback(
-                            instance->context,
-                            level_duration_get_level(instance->filter_level_duration),
-                            instance->filter_level_duration.duration);
-                    const uint32_t elapsed = furi_get_tick() - callback_start;
-                    if(elapsed > instance->callback_max_ticks)
-                        instance->callback_max_ticks = elapsed;
-
-                    instance->filter_level_duration = level_duration;
-                }
+                const uint32_t callback_start = furi_get_tick();
+                if(instance->pair_callback)
+                    instance->pair_callback(
+                        instance->context,
+                        level_duration_get_level(level_duration),
+                        level_duration_get_duration(level_duration));
+                const uint32_t elapsed = furi_get_tick() - callback_start;
+                if(elapsed > instance->callback_max_ticks) instance->callback_max_ticks = elapsed;
             }
         }
 
         const uint32_t now = furi_get_tick();
+        if(instance->tick_callback && now - tick_stamp >= furi_ms_to_ticks(100)) {
+            tick_stamp = now;
+            instance->tick_callback(instance->context);
+        }
         if(now - instance->stats_stamp >= furi_ms_to_ticks(1000)) {
             instance->stats_stamp = now;
             furi_log_print_format(
@@ -181,6 +209,8 @@ static int32_t subghz_worker_thread_callback(void* context) {
         }
     }
 
+    if(instance->overrun && instance->overrun_callback)
+        instance->overrun_callback(instance->context);
     return 0;
 }
 
@@ -196,8 +226,9 @@ SubGhzWorker* subghz_worker_alloc_ex(size_t stream_samples) {
     instance->requested_priority = FuriThreadPriorityHigh;
     furi_thread_set_priority(instance->thread, instance->requested_priority);
 
-    instance->stream =
-        furi_stream_buffer_alloc(sizeof(LevelDuration) * stream_samples, sizeof(LevelDuration));
+    instance->stream = furi_stream_buffer_alloc(
+        sizeof(LevelDuration) * stream_samples,
+        sizeof(LevelDuration) * MIN(stream_samples, SUBGHZ_WORKER_BATCH_SAMPLES));
 
     instance->running = false;
     instance->overrun = false;
@@ -211,12 +242,14 @@ SubGhzWorker* subghz_worker_alloc_ex(size_t stream_samples) {
     instance->retune_discard_until = 0;
     instance->retune_payload = 0;
     instance->overrun_callback = NULL;
+    instance->tick_callback = NULL;
     instance->pair_callback = NULL;
     instance->barrier_callback = NULL;
     instance->context = NULL;
     instance->filter_level_duration.level = LEVEL_DURATION_RESET;
     instance->filter_level_duration.duration = 0;
 
+    instance->last_capture_tick = 0;
     instance->filter_duration = 30;
 
     return instance;
@@ -276,7 +309,9 @@ void subghz_worker_stop(SubGhzWorker* instance) {
     furi_check(instance);
     furi_check(instance->running);
 
+    FURI_CRITICAL_ENTER();
     instance->running = false;
+    FURI_CRITICAL_EXIT();
 
     furi_thread_join(instance->thread);
     FURI_LOG_D(
@@ -305,6 +340,7 @@ void subghz_worker_retune(SubGhzWorker* instance, uint32_t payload) {
     furi_check(instance);
 
     FURI_CRITICAL_ENTER();
+    instance->filter_level_duration = level_duration_reset();
     instance->retune_payload = payload & 0x3FFFFFFFU;
     instance->retune_discard_until = instance->write_seq;
     instance->retune_req++;
@@ -323,7 +359,9 @@ uint32_t subghz_worker_get_overrun_count(SubGhzWorker* instance) {
 
 void subghz_worker_set_filter(SubGhzWorker* instance, uint16_t timeout) {
     furi_check(instance);
+    FURI_CRITICAL_ENTER();
     instance->filter_duration = timeout;
+    FURI_CRITICAL_EXIT();
 }
 
 void subghz_worker_set_priority(SubGhzWorker* instance, FuriThreadPriority priority) {
@@ -331,4 +369,9 @@ void subghz_worker_set_priority(SubGhzWorker* instance, FuriThreadPriority prior
     furi_check(priority <= FuriThreadPriorityIsr);
     instance->requested_priority = priority;
     if(!instance->running) furi_thread_set_priority(instance->thread, priority);
+}
+
+void subghz_worker_set_tick_callback(SubGhzWorker* instance, SubGhzWorkerOverrunCallback callback) {
+    furi_check(!instance->running);
+    instance->tick_callback = callback;
 }

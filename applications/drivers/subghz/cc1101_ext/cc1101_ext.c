@@ -9,6 +9,9 @@
 #include <furi_hal_bus.h>
 
 #include <stm32wbxx_ll_dma.h>
+#include <stm32wbxx_ll_dmamux.h>
+#include <stm32wbxx_ll_exti.h>
+#include <stm32wbxx_ll_spi.h>
 #include <furi_hal_cortex.h>
 
 #include <furi.h>
@@ -79,10 +82,27 @@ typedef struct {
     SubGhzDeviceCC1101ExtAsyncTxMiddleware middleware;
 } SubGhzDeviceCC1101ExtAsyncTx;
 
+#define CC1101_RX_SAMPLES       2048u
+#define CC1101_RX_SERVICE_TICKS 500u
 typedef struct {
     uint32_t capture_delta_duration;
     SubGhzDeviceCC1101ExtCaptureCallback capture_callback;
     void* capture_callback_context;
+    uint32_t timer_ticks;
+    uint32_t last_ticks;
+    uint16_t idle_wraps;
+    bool discard_next;
+    bool last_pin_high;
+    uint16_t* timestamps;
+    uint8_t* levels;
+    uint32_t read_index;
+    uint32_t clear_mask;
+    uint32_t saved_request[3];
+    bool irq_was_enabled;
+    bool event_was_enabled;
+    bool stopping;
+    bool flooding;
+    uint32_t service_ticks;
 } SubGhzDeviceCC1101ExtAsyncRx;
 
 typedef struct {
@@ -144,9 +164,54 @@ static void subghz_device_cc1101_ext_shadow_set_from(const uint8_t* data) {
     subghz_device_cc1101_ext_shadow_valid = true;
 }
 
+static void subghz_device_cc1101_ext_spi_event_callback(
+    const FuriHalSpiBusHandle* handle,
+    FuriHalSpiBusHandleEvent event) {
+    if(event == FuriHalSpiBusHandleEventInit) {
+        furi_hal_gpio_write(handle->cs, true);
+        furi_hal_gpio_init(handle->cs, GpioModeOutputPushPull, GpioPullUp, GpioSpeedLow);
+    } else if(event == FuriHalSpiBusHandleEventDeinit) {
+        furi_hal_gpio_write(handle->cs, true);
+        furi_hal_gpio_init(handle->cs, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+    } else if(event == FuriHalSpiBusHandleEventActivate) {
+        LL_SPI_Init(handle->bus->spi, (LL_SPI_InitTypeDef*)&furi_hal_spi_preset_1edge_low_2m);
+        LL_SPI_SetRxFIFOThreshold(handle->bus->spi, LL_SPI_RX_FIFO_TH_QUARTER);
+        LL_SPI_Enable(handle->bus->spi);
+        furi_hal_gpio_init_ex(
+            handle->miso, GpioModeAltFunctionPushPull, GpioPullDown, GpioSpeedLow, GpioAltFn5SPI1);
+        furi_hal_gpio_init_ex(
+            handle->mosi, GpioModeAltFunctionPushPull, GpioPullDown, GpioSpeedLow, GpioAltFn5SPI1);
+        furi_hal_gpio_init_ex(
+            handle->sck, GpioModeAltFunctionPushPull, GpioPullDown, GpioSpeedLow, GpioAltFn5SPI1);
+        furi_hal_gpio_write(handle->cs, false);
+    } else if(event == FuriHalSpiBusHandleEventDeactivate) {
+        furi_hal_gpio_write(handle->cs, true);
+        furi_hal_gpio_init(handle->miso, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+        furi_hal_gpio_init(handle->mosi, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+        furi_hal_gpio_init(handle->sck, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+        LL_SPI_Disable(handle->bus->spi);
+    }
+}
+
+enum {
+    SubGhzDeviceCC1101ExtLinkUnknown,
+    SubGhzDeviceCC1101ExtLinkGood,
+    SubGhzDeviceCC1101ExtLinkBad,
+};
+static volatile uint8_t subghz_device_cc1101_ext_link = SubGhzDeviceCC1101ExtLinkUnknown;
+
+static const FuriHalSpiBusHandle subghz_device_cc1101_ext_spi_handle = {
+    .bus = &furi_hal_spi_bus_r,
+    .callback = subghz_device_cc1101_ext_spi_event_callback,
+    .miso = &gpio_ext_pa6,
+    .mosi = &gpio_ext_pa7,
+    .sck = &gpio_ext_pb3,
+    .cs = &gpio_ext_pa4,
+};
+
 static void subghz_device_cc1101_ext_miso_spi(const FuriHalSpiBusHandle* handle) {
     furi_hal_gpio_init_ex(
-        handle->miso, GpioModeAltFunctionPushPull, GpioPullDown, GpioSpeedVeryHigh, GpioAltFn5SPI1);
+        handle->miso, GpioModeAltFunctionPushPull, GpioPullDown, GpioSpeedLow, GpioAltFn5SPI1);
 }
 
 static bool subghz_device_cc1101_ext_version_is_cc1101(void) {
@@ -311,7 +376,7 @@ bool subghz_device_cc1101_ext_alloc(SubGhzDeviceConf* conf) {
     subghz_device_cc1101_ext->state = SubGhzDeviceCC1101ExtStateInit;
     subghz_device_cc1101_ext->regulation = SubGhzDeviceCC1101ExtRegulationTxRx;
     subghz_device_cc1101_ext->async_mirror_pin = NULL;
-    subghz_device_cc1101_ext->spi_bus_handle = &furi_hal_spi_bus_handle_external;
+    subghz_device_cc1101_ext->spi_bus_handle = &subghz_device_cc1101_ext_spi_handle;
     subghz_device_cc1101_ext->g0_pin = SUBGHZ_DEVICE_CC1101_EXT_TX_GPIO;
     subghz_device_cc1101_ext->amp_and_leds = false;
     subghz_device_cc1101_ext->extended_range = false;
@@ -347,13 +412,28 @@ void subghz_device_cc1101_ext_free(void) {
     }
 
     subghz_device_cc1101_ext_shadow_invalidate();
+    subghz_device_cc1101_ext_hop_cache_reset();
 
     free(subghz_device_cc1101_ext);
     subghz_device_cc1101_ext = NULL;
 }
 
 void subghz_device_cc1101_ext_set_async_mirror_pin(const GpioPin* pin) {
+    FURI_CRITICAL_ENTER();
+    const GpioPin* previous = subghz_device_cc1101_ext->async_mirror_pin;
     subghz_device_cc1101_ext->async_mirror_pin = pin;
+    if(subghz_device_cc1101_ext->state == SubGhzDeviceCC1101ExtStateAsyncRx) {
+        if(previous && previous != pin)
+            furi_hal_gpio_init(previous, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+        if(pin) {
+            furi_hal_gpio_init(pin, GpioModeOutputPushPull, GpioPullNo, GpioSpeedVeryHigh);
+            LL_DMA_ClearFlag_TC5(DMA2);
+            LL_DMA_EnableIT_TC(DMA2, LL_DMA_CHANNEL_5);
+        } else {
+            LL_DMA_DisableIT_TC(DMA2, LL_DMA_CHANNEL_5);
+        }
+    }
+    FURI_CRITICAL_EXIT();
 }
 
 const GpioPin* subghz_device_cc1101_ext_get_data_gpio(void) {
@@ -367,6 +447,11 @@ bool subghz_device_cc1101_ext_is_connect(void) {
         ret = subghz_device_cc1101_ext_alloc(NULL);
         subghz_device_cc1101_ext_free();
     } else { // initialized
+        FURI_CRITICAL_ENTER();
+        const uint8_t link = subghz_device_cc1101_ext_link;
+        subghz_device_cc1101_ext_link = SubGhzDeviceCC1101ExtLinkUnknown;
+        FURI_CRITICAL_EXIT();
+        if(link == SubGhzDeviceCC1101ExtLinkGood) return true;
         furi_hal_spi_acquire(subghz_device_cc1101_ext->spi_bus_handle);
         //a genuine CC1101 reads PARTNUM as 0x00, same as an empty bus; only VERSION
         //separates them
@@ -607,10 +692,22 @@ bool subghz_device_cc1101_ext_tx(void) {
     furi_hal_spi_release(subghz_device_cc1101_ext->spi_bus_handle);
     return in_tx;
 }
+static inline uint8_t subghz_device_cc1101_ext_rssi_raw(void) {
+    uint8_t tx[2] = {CC1101_STATUS_RSSI | CC1101_BURST | CC1101_READ, 0};
+    uint8_t rx[2] = {0};
+    furi_hal_spi_bus_trx(subghz_device_cc1101_ext->spi_bus_handle, tx, rx, 2, CC1101_TIMEOUT);
+    if((rx[0] & 0xF0) != (CC1101StateRX << 4)) {
+        subghz_device_cc1101_ext_link = SubGhzDeviceCC1101ExtLinkBad;
+        return 0x80;
+    } else if(subghz_device_cc1101_ext_link == SubGhzDeviceCC1101ExtLinkUnknown) {
+        subghz_device_cc1101_ext_link = SubGhzDeviceCC1101ExtLinkGood;
+    }
+    return rx[1];
+}
 
 float subghz_device_cc1101_ext_get_rssi(void) {
     furi_hal_spi_acquire(subghz_device_cc1101_ext->spi_bus_handle);
-    int32_t rssi_dec = cc1101_get_rssi(subghz_device_cc1101_ext->spi_bus_handle);
+    int32_t rssi_dec = subghz_device_cc1101_ext_rssi_raw();
     furi_hal_spi_release(subghz_device_cc1101_ext->spi_bus_handle);
 
     float rssi = rssi_dec;
@@ -621,13 +718,6 @@ float subghz_device_cc1101_ext_get_rssi(void) {
     }
 
     return rssi;
-}
-
-static inline uint8_t subghz_device_cc1101_ext_rssi_raw(void) {
-    uint8_t tx[2] = {CC1101_STATUS_RSSI | CC1101_BURST | CC1101_READ, 0};
-    uint8_t rx[2] = {0};
-    furi_hal_spi_bus_trx(subghz_device_cc1101_ext->spi_bus_handle, tx, rx, 2, CC1101_TIMEOUT);
-    return rx[1];
 }
 
 uint32_t subghz_device_cc1101_ext_rssi_burst(uint8_t* out, size_t count, uint32_t period_us) {
@@ -744,35 +834,229 @@ static bool subghz_device_cc1101_ext_stop_debug(void) {
     return ret;
 }
 
-static void subghz_device_cc1101_ext_capture_ISR(void* context) {
-    UNUSED(context);
+static void subghz_device_cc1101_ext_capture_requests(bool enable) {
+    for(uint32_t i = 0; i < 3; i++) {
+        if(enable)
+            LL_DMAMUX_EnableRequestGen(DMAMUX1, i);
+        else
+            LL_DMAMUX_DisableRequestGen(DMAMUX1, i);
+    }
+}
 
-    if(subghz_device_cc1101_ext->hop_blank) {
-        LL_TIM_SetCounter(TIM17, 4);
+static void subghz_device_cc1101_ext_mirror_ISR(void* context) {
+    UNUSED(context);
+    LL_DMA_ClearFlag_TC5(DMA2);
+    if(subghz_device_cc1101_ext->async_mirror_pin)
+        furi_hal_gpio_write(
+            subghz_device_cc1101_ext->async_mirror_pin,
+            furi_hal_gpio_read(subghz_device_cc1101_ext->g0_pin));
+}
+
+static uint32_t subghz_device_cc1101_ext_capture_now(void) {
+    SubGhzDeviceCC1101ExtAsyncRx* rx = &subghz_device_cc1101_ext->async_rx;
+    uint32_t counter = LL_TIM_GetCounter(TIM17);
+    if(LL_TIM_IsActiveFlag_UPDATE(TIM17)) {
+        LL_TIM_ClearFlag_UPDATE(TIM17);
+        rx->timer_ticks += 0x10000u;
+        if(rx->idle_wraps < 8193u) rx->idle_wraps++;
+        counter = LL_TIM_GetCounter(TIM17);
+    }
+    return rx->timer_ticks + counter;
+}
+
+static void subghz_device_cc1101_ext_capture_rearm(void) {
+    LL_EXTI_DisableIT_0_31(LL_EXTI_LINE_2);
+    subghz_device_cc1101_ext_capture_requests(false);
+    LL_DMA_DisableChannel(DMA2, LL_DMA_CHANNEL_3);
+    LL_DMA_DisableChannel(DMA2, LL_DMA_CHANNEL_4);
+    LL_DMA_DisableChannel(DMA2, LL_DMA_CHANNEL_5);
+    LL_DMA_SetDataLength(DMA2, LL_DMA_CHANNEL_3, CC1101_RX_SAMPLES);
+    LL_DMA_SetDataLength(DMA2, LL_DMA_CHANNEL_4, CC1101_RX_SAMPLES * 3u);
+    LL_DMA_SetDataLength(DMA2, LL_DMA_CHANNEL_5, 1);
+    LL_DMA_ClearFlag_GI3(DMA2);
+    LL_DMA_ClearFlag_GI4(DMA2);
+    LL_DMA_ClearFlag_GI5(DMA2);
+    LL_DMAMUX_ClearFlag_RGO0(DMAMUX1);
+    LL_DMAMUX_ClearFlag_RGO1(DMAMUX1);
+    LL_DMAMUX_ClearFlag_RGO2(DMAMUX1);
+    subghz_device_cc1101_ext->async_rx.read_index = 0;
+    LL_DMA_EnableChannel(DMA2, LL_DMA_CHANNEL_3);
+    LL_DMA_EnableChannel(DMA2, LL_DMA_CHANNEL_4);
+    LL_DMA_EnableChannel(DMA2, LL_DMA_CHANNEL_5);
+    LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_2);
+    subghz_device_cc1101_ext_capture_requests(true);
+    LL_EXTI_EnableIT_0_31(LL_EXTI_LINE_2);
+}
+
+static void subghz_device_cc1101_ext_capture_drain(void) {
+    SubGhzDeviceCC1101ExtAsyncRx* rx = &subghz_device_cc1101_ext->async_rx;
+    const bool lost = LL_DMA_IsActiveFlag_TE3(DMA2) || LL_DMA_IsActiveFlag_TE4(DMA2) ||
+                      LL_DMA_IsActiveFlag_TE5(DMA2) ||
+                      (LL_DMA_IsActiveFlag_HT4(DMA2) && LL_DMA_IsActiveFlag_TC4(DMA2)) ||
+                      LL_DMAMUX_IsActiveFlag_RGO0(DMAMUX1) ||
+                      LL_DMAMUX_IsActiveFlag_RGO1(DMAMUX1) || LL_DMAMUX_IsActiveFlag_RGO2(DMAMUX1);
+    const uint32_t end =
+        ((CC1101_RX_SAMPLES * 3u - LL_DMA_GetDataLength(DMA2, LL_DMA_CHANNEL_4)) / 3u) %
+        CC1101_RX_SAMPLES;
+    LL_DMA_ClearFlag_GI3(DMA2);
+    LL_DMA_ClearFlag_GI4(DMA2);
+    LL_DMA_ClearFlag_TE5(DMA2);
+    LL_DMAMUX_ClearFlag_RGO0(DMAMUX1);
+    LL_DMAMUX_ClearFlag_RGO1(DMAMUX1);
+    LL_DMAMUX_ClearFlag_RGO2(DMAMUX1);
+    // Service the timer overflow before anything can return: the lost path used to leave the
+    // TIM17 update flag set, and with capture requests overrunning continuously (sub-microsecond
+    // slicer glitches) every re-entry took the lost path again - the ISR never exited.
+    __DMB();
+    const uint32_t now = subghz_device_cc1101_ext_capture_now();
+    // Edge flood guard. Real data tops out near 45k edges/s; a sustained rate above ~150k/s is
+    // the pin toggling on its own (a module that reset and outputs its clock on GDO0, a loose
+    // wire). Feeding that to the callback edge by edge keeps this ISR busy forever and freezes
+    // the whole system, so the block is dropped as lost instead.
+    const uint32_t backlog = (end + CC1101_RX_SAMPLES - rx->read_index) % CC1101_RX_SAMPLES;
+    const uint32_t elapsed = now - rx->service_ticks; // 2 us units
+    rx->service_ticks = now;
+    const bool flood = !rx->stopping && backlog >= 64u && backlog * 10u > elapsed * 3u;
+    if(lost || flood) {
+
+        if(!rx->stopping)
+            subghz_device_cc1101_ext_capture_rearm();
+        else
+            rx->read_index = end;
+        rx->discard_next = true;
+        if((!flood || !rx->flooding) && rx->capture_callback)
+            rx->capture_callback(false, 0, rx->capture_callback_context);
+        rx->flooding = flood;
         return;
     }
-    if(!furi_hal_gpio_read(subghz_device_cc1101_ext->g0_pin)) {
-        if(subghz_device_cc1101_ext->async_rx.capture_callback) {
-            if(subghz_device_cc1101_ext->async_mirror_pin != NULL)
-                furi_hal_gpio_write(subghz_device_cc1101_ext->async_mirror_pin, false);
-
-            subghz_device_cc1101_ext->async_rx.capture_callback(
-                true,
-                LL_TIM_GetCounter(TIM17) << 1,
-                (void*)subghz_device_cc1101_ext->async_rx.capture_callback_context);
-        }
-    } else {
-        if(subghz_device_cc1101_ext->async_rx.capture_callback) {
-            if(subghz_device_cc1101_ext->async_mirror_pin != NULL)
-                furi_hal_gpio_write(subghz_device_cc1101_ext->async_mirror_pin, true);
-
-            subghz_device_cc1101_ext->async_rx.capture_callback(
-                false,
-                LL_TIM_GetCounter(TIM17) << 1,
-                (void*)subghz_device_cc1101_ext->async_rx.capture_callback_context);
+    rx->flooding = false;
+    while(rx->read_index != end) {
+        const uint16_t low = rx->timestamps[rx->read_index];
+        const uint8_t* levels = &rx->levels[rx->read_index * 3u];
+        const unsigned highs = !!(levels[0] & LL_GPIO_PIN_2) + !!(levels[1] & LL_GPIO_PIN_2) +
+                               !!(levels[2] & LL_GPIO_PIN_2);
+        const bool pin_high = highs >= 2;
+        rx->read_index = (rx->read_index + 1) % CC1101_RX_SAMPLES;
+        if(!rx->discard_next && pin_high == rx->last_pin_high) continue;
+        rx->last_pin_high = pin_high;
+        uint32_t stamp = (now & 0xFFFF0000u) | low;
+        if((int32_t)(stamp - now) > 0) stamp -= 0x10000u;
+        const uint32_t ticks = rx->idle_wraps >= 8193u ? 0x1FFFFFFFu :
+                                                         MIN(stamp - rx->last_ticks, 0x1FFFFFFFu);
+        rx->last_ticks = stamp;
+        rx->idle_wraps = 0;
+        if(subghz_device_cc1101_ext->hop_blank) {
+            rx->discard_next = true;
+        } else if(rx->discard_next) {
+            rx->discard_next = false;
+        } else if(ticks && rx->capture_callback) {
+            rx->capture_callback(!pin_high, ticks << 1, rx->capture_callback_context);
         }
     }
-    LL_TIM_SetCounter(TIM17, 4); //8>>1
+}
+
+static void subghz_device_cc1101_ext_capture_timer_ISR(void* context) {
+    UNUSED(context);
+    if(LL_TIM_IsActiveFlag_CC1(TIM17)) {
+        LL_TIM_ClearFlag_CC1(TIM17);
+        LL_TIM_OC_SetCompareCH1(
+            TIM17, (LL_TIM_GetCounter(TIM17) + CC1101_RX_SERVICE_TICKS) & 0xFFFFu);
+    }
+    subghz_device_cc1101_ext_capture_drain();
+}
+
+static void subghz_device_cc1101_ext_capture_dma_start(void) {
+    SubGhzDeviceCC1101ExtAsyncRx* rx = &subghz_device_cc1101_ext->async_rx;
+    rx->timestamps = malloc(CC1101_RX_SAMPLES * sizeof(uint16_t));
+    rx->levels = malloc(CC1101_RX_SAMPLES * 3u * sizeof(uint8_t));
+    rx->read_index = 0;
+    rx->clear_mask = LL_EXTI_LINE_2;
+    rx->irq_was_enabled = NVIC_GetEnableIRQ(EXTI2_IRQn);
+    rx->event_was_enabled = LL_EXTI_IsEnabledEvent_0_31(LL_EXTI_LINE_2);
+    NVIC_DisableIRQ(EXTI2_IRQn);
+    LL_EXTI_DisableIT_0_31(LL_EXTI_LINE_2);
+    for(uint32_t i = 0; i < 3; i++) {
+        furi_check(!LL_DMAMUX_IsEnabledRequestGen(DMAMUX1, i));
+        DMAMUX_RequestGen_TypeDef* gen = (void*)((uintptr_t)DMAMUX1_RequestGenerator0 + 4 * i);
+        rx->saved_request[i] = gen->RGCR;
+        LL_DMAMUX_SetRequestSignalID(DMAMUX1, i, LL_DMAMUX_REQ_GEN_EXTI_LINE2);
+        LL_DMAMUX_SetRequestGenPolarity(DMAMUX1, i, LL_DMAMUX_REQ_GEN_POL_RISING);
+        LL_DMAMUX_SetGenRequestNb(DMAMUX1, i, i == 1 ? 3 : 1);
+    }
+    LL_DMA_InitTypeDef cfg = {0};
+    cfg.PeriphOrM2MSrcAddress = (uint32_t)&TIM17->CNT;
+    cfg.MemoryOrM2MDstAddress = (uint32_t)rx->timestamps;
+    cfg.Direction = LL_DMA_DIRECTION_PERIPH_TO_MEMORY;
+    cfg.Mode = LL_DMA_MODE_CIRCULAR;
+    cfg.PeriphOrM2MSrcIncMode = LL_DMA_PERIPH_NOINCREMENT;
+    cfg.MemoryOrM2MDstIncMode = LL_DMA_MEMORY_INCREMENT;
+    cfg.PeriphOrM2MSrcDataSize = LL_DMA_PDATAALIGN_HALFWORD;
+    cfg.MemoryOrM2MDstDataSize = LL_DMA_MDATAALIGN_HALFWORD;
+    cfg.NbData = CC1101_RX_SAMPLES;
+    cfg.PeriphRequest = LL_DMAMUX_REQ_GENERATOR0;
+    cfg.Priority = LL_DMA_PRIORITY_VERYHIGH;
+    LL_DMA_DeInit(DMA2, LL_DMA_CHANNEL_3);
+    LL_DMA_Init(DMA2, LL_DMA_CHANNEL_3, &cfg);
+    cfg.PeriphOrM2MSrcAddress = (uint32_t)&GPIOB->IDR;
+    cfg.MemoryOrM2MDstAddress = (uint32_t)rx->levels;
+    cfg.MemoryOrM2MDstDataSize = LL_DMA_MDATAALIGN_BYTE;
+    cfg.PeriphRequest = LL_DMAMUX_REQ_GENERATOR1;
+    cfg.NbData = CC1101_RX_SAMPLES * 3u;
+    LL_DMA_DeInit(DMA2, LL_DMA_CHANNEL_4);
+    LL_DMA_Init(DMA2, LL_DMA_CHANNEL_4, &cfg);
+    cfg.PeriphOrM2MSrcAddress = (uint32_t)&EXTI->PR1;
+    cfg.MemoryOrM2MDstAddress = (uint32_t)&rx->clear_mask;
+    cfg.Direction = LL_DMA_DIRECTION_MEMORY_TO_PERIPH;
+    cfg.MemoryOrM2MDstIncMode = LL_DMA_MEMORY_NOINCREMENT;
+    cfg.PeriphOrM2MSrcDataSize = LL_DMA_PDATAALIGN_WORD;
+    cfg.MemoryOrM2MDstDataSize = LL_DMA_MDATAALIGN_WORD;
+    cfg.NbData = 1;
+    cfg.PeriphRequest = LL_DMAMUX_REQ_GENERATOR2;
+    LL_DMA_DeInit(DMA2, LL_DMA_CHANNEL_5);
+    LL_DMA_Init(DMA2, LL_DMA_CHANNEL_5, &cfg);
+    LL_DMA_ClearFlag_GI3(DMA2);
+    LL_DMA_ClearFlag_GI4(DMA2);
+    LL_DMA_ClearFlag_GI5(DMA2);
+    LL_DMAMUX_ClearFlag_RGO0(DMAMUX1);
+    LL_DMAMUX_ClearFlag_RGO1(DMAMUX1);
+    LL_DMAMUX_ClearFlag_RGO2(DMAMUX1);
+    furi_hal_interrupt_set_isr(
+        FuriHalInterruptIdDma2Ch5, subghz_device_cc1101_ext_mirror_ISR, NULL);
+    if(subghz_device_cc1101_ext->async_mirror_pin) LL_DMA_EnableIT_TC(DMA2, LL_DMA_CHANNEL_5);
+    LL_DMA_EnableChannel(DMA2, LL_DMA_CHANNEL_3);
+    LL_DMA_EnableChannel(DMA2, LL_DMA_CHANNEL_4);
+    LL_DMA_EnableChannel(DMA2, LL_DMA_CHANNEL_5);
+    LL_EXTI_EnableEvent_0_31(LL_EXTI_LINE_2);
+    subghz_device_cc1101_ext_capture_requests(true);
+    LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_2);
+    NVIC_ClearPendingIRQ(EXTI2_IRQn);
+    LL_EXTI_EnableIT_0_31(LL_EXTI_LINE_2);
+}
+
+static void subghz_device_cc1101_ext_capture_dma_stop(void) {
+    SubGhzDeviceCC1101ExtAsyncRx* rx = &subghz_device_cc1101_ext->async_rx;
+    LL_EXTI_DisableIT_0_31(LL_EXTI_LINE_2);
+    subghz_device_cc1101_ext_capture_requests(false);
+    LL_DMA_DisableChannel(DMA2, LL_DMA_CHANNEL_3);
+    LL_DMA_DisableChannel(DMA2, LL_DMA_CHANNEL_4);
+    LL_DMA_DisableChannel(DMA2, LL_DMA_CHANNEL_5);
+    rx->stopping = true;
+    subghz_device_cc1101_ext_capture_drain();
+    LL_DMA_DeInit(DMA2, LL_DMA_CHANNEL_3);
+    LL_DMA_DeInit(DMA2, LL_DMA_CHANNEL_4);
+    LL_DMA_DeInit(DMA2, LL_DMA_CHANNEL_5);
+    furi_hal_interrupt_set_isr(FuriHalInterruptIdDma2Ch5, NULL, NULL);
+    for(uint32_t i = 0; i < 3; i++)
+        ((DMAMUX_RequestGen_TypeDef*)((uintptr_t)DMAMUX1_RequestGenerator0 + 4 * i))->RGCR =
+            rx->saved_request[i];
+    if(!rx->event_was_enabled) LL_EXTI_DisableEvent_0_31(LL_EXTI_LINE_2);
+    LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_2);
+    NVIC_ClearPendingIRQ(EXTI2_IRQn);
+    if(rx->irq_was_enabled) NVIC_EnableIRQ(EXTI2_IRQn);
+    free(rx->timestamps);
+    free(rx->levels);
+    rx->timestamps = NULL;
+    rx->levels = NULL;
 }
 
 void subghz_device_cc1101_ext_start_async_rx(
@@ -785,6 +1069,13 @@ void subghz_device_cc1101_ext_start_async_rx(
 
     subghz_device_cc1101_ext->async_rx.capture_callback = callback;
     subghz_device_cc1101_ext->async_rx.capture_callback_context = context;
+    subghz_device_cc1101_ext->async_rx.timer_ticks = 0;
+    subghz_device_cc1101_ext->async_rx.last_ticks = 0;
+    subghz_device_cc1101_ext->async_rx.idle_wraps = 0;
+    subghz_device_cc1101_ext->async_rx.discard_next = true;
+    subghz_device_cc1101_ext->async_rx.stopping = false;
+    subghz_device_cc1101_ext->async_rx.flooding = false;
+    subghz_device_cc1101_ext->async_rx.service_ticks = 0;
 
     furi_hal_bus_enable(FuriHalBusTIM17);
 
@@ -806,17 +1097,23 @@ void subghz_device_cc1101_ext_start_async_rx(
     furi_hal_gpio_init(
         subghz_device_cc1101_ext->g0_pin, GpioModeInterruptRiseFall, GpioPullUp, GpioSpeedVeryHigh);
     furi_hal_gpio_remove_int_callback(subghz_device_cc1101_ext->g0_pin);
-    furi_hal_gpio_add_int_callback(
-        subghz_device_cc1101_ext->g0_pin,
-        subghz_device_cc1101_ext_capture_ISR,
-        subghz_device_cc1101_ext->async_rx.capture_callback);
 
-    // Start timer
+    // Start the overflow extension before accepting capture edges.
     LL_TIM_SetCounter(TIM17, 0);
-    LL_TIM_EnableCounter(TIM17);
+    LL_TIM_ClearFlag_UPDATE(TIM17);
+    furi_hal_interrupt_set_isr(
+        FuriHalInterruptIdTim1TrgComTim17, subghz_device_cc1101_ext_capture_timer_ISR, NULL);
+    LL_TIM_OC_SetMode(TIM17, LL_TIM_CHANNEL_CH1, LL_TIM_OCMODE_FROZEN);
+    LL_TIM_OC_SetCompareCH1(TIM17, CC1101_RX_SERVICE_TICKS);
+    LL_TIM_ClearFlag_CC1(TIM17);
 
     // Start debug
     subghz_device_cc1101_ext_start_debug();
+
+    subghz_device_cc1101_ext_capture_dma_start();
+    LL_TIM_EnableIT_CC1(TIM17);
+    LL_TIM_EnableIT_UPDATE(TIM17);
+    LL_TIM_EnableCounter(TIM17);
 
     // Switch to RX
     subghz_device_cc1101_ext_rx();
@@ -1003,8 +1300,17 @@ bool subghz_device_cc1101_ext_hop_goto(uint32_t frequency, const uint8_t* preset
 void subghz_device_cc1101_ext_hop_resume(void) {
     if(subghz_device_cc1101_ext == NULL) return;
     if(subghz_device_cc1101_ext->state != SubGhzDeviceCC1101ExtStateAsyncRx) return;
-    LL_TIM_SetCounter(TIM17, 0);
+    FURI_CRITICAL_ENTER();
+    SubGhzDeviceCC1101ExtAsyncRx* rx = &subghz_device_cc1101_ext->async_rx;
+    rx->read_index =
+        ((CC1101_RX_SAMPLES * 3u - LL_DMA_GetDataLength(DMA2, LL_DMA_CHANNEL_4)) / 3u) %
+        CC1101_RX_SAMPLES;
+    LL_DMA_ClearFlag_GI4(DMA2);
+    rx->last_ticks = subghz_device_cc1101_ext_capture_now();
+    rx->idle_wraps = 0;
+    rx->discard_next = true;
     subghz_device_cc1101_ext->hop_blank = false;
+    FURI_CRITICAL_EXIT();
 }
 
 bool subghz_device_cc1101_ext_hop_read_image(uint8_t* out) {
@@ -1037,13 +1343,18 @@ void subghz_device_cc1101_ext_stop_async_rx(void) {
     subghz_device_cc1101_ext_idle();
 
     FURI_CRITICAL_ENTER();
+    furi_hal_gpio_remove_int_callback(subghz_device_cc1101_ext->g0_pin);
+    LL_TIM_DisableIT_UPDATE(TIM17);
+    LL_TIM_DisableIT_CC1(TIM17);
+    subghz_device_cc1101_ext_capture_dma_stop();
+    furi_hal_interrupt_set_isr(FuriHalInterruptIdTim1TrgComTim17, NULL, NULL);
     furi_hal_bus_disable(FuriHalBusTIM17);
 
     // Stop debug
     subghz_device_cc1101_ext_stop_debug();
+    subghz_device_cc1101_ext->async_rx.capture_callback = NULL;
 
     FURI_CRITICAL_EXIT();
-    furi_hal_gpio_remove_int_callback(subghz_device_cc1101_ext->g0_pin);
     furi_hal_gpio_init(subghz_device_cc1101_ext->g0_pin, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
 }
 

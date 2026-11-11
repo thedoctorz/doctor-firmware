@@ -1,8 +1,7 @@
 #include "../subghz_i.h"
 
 #include <lib/subghz/blocks/custom_btn.h>
-#include <lib/subghz/protocols/fiat_v1.h>
-#include <lib/subghz/protocols/renault_v1.h>
+#include <lib/subghz/protocols/hitag2.h>
 #include <lib/subghz/protocols/psa.h>
 
 #include "../helpers/subghz_psa_bf.h"

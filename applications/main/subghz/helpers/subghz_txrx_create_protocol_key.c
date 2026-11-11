@@ -27,6 +27,7 @@ bool subghz_txrx_gen_data_protocol(
     bool res = false;
 
     subghz_txrx_set_preset(instance, preset_name, frequency, NULL, 0);
+    subghz_txrx_release_decoder_result(instance);
     instance->decoder_result =
         subghz_receiver_search_decoder_base_by_name(instance->receiver, protocol_name);
 

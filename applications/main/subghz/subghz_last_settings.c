@@ -50,7 +50,7 @@ void subghz_last_settings_load(SubGhzLastSettings* instance, size_t preset_count
     instance->frequency_analyzer_feedback_level =
         SUBGHZ_LAST_SETTING_FREQUENCY_ANALYZER_FEEDBACK_LEVEL;
     instance->frequency_analyzer_trigger = SUBGHZ_LAST_SETTING_FREQUENCY_ANALYZER_TRIGGER;
-    // See bin_raw_value in scenes/subghz_scene_receiver_config.c
+    // BinRAW is off by default
     instance->filter = SubGhzProtocolFlag_Decodable;
     instance->rssi = SUBGHZ_RAW_THRESHOLD_MIN;
     instance->hopping_threshold = -90.0f;

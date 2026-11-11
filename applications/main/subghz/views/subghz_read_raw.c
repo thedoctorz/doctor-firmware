@@ -1,4 +1,5 @@
 #include "subghz_read_raw.h"
+#include "receiver_activity.h"
 #include "../subghz_i.h"
 
 #include <furi.h>
@@ -206,67 +207,31 @@ void subghz_read_raw_draw_scale(Canvas* canvas, SubGhzReadRAWModel* model) {
 }
 
 void subghz_read_raw_draw_rssi(Canvas* canvas, SubGhzReadRAWModel* model) {
-    int ind = 0;
-    int base = 0;
-    uint8_t width = 2;
-    if(model->rssi_history_end == false) {
-        for(int i = model->ind_write; i >= 0; i--) {
-            canvas_draw_line(canvas, i, 47, i, 47 - model->rssi_history[i]);
-        }
-        canvas_draw_line(
-            canvas, model->ind_write + 1, 47, model->ind_write + 1, 47 - model->rssi_current);
-        if(model->ind_write > 3) {
-            canvas_draw_line(
-                canvas, model->ind_write - 1, 47, model->ind_write - 1, 47 - model->rssi_current);
 
-            for(uint8_t i = 13; i < 47; i += width * 2) {
-                canvas_draw_line(canvas, model->ind_write, i, model->ind_write, i + width);
-            }
-            canvas_draw_line(canvas, model->ind_write - 2, 12, model->ind_write + 2, 12);
-            canvas_draw_line(canvas, model->ind_write - 1, 13, model->ind_write + 1, 13);
+    const int baseline = 47;
+    const bool wrapped = model->rssi_history_end;
+    const int cursor = wrapped ? SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE : model->ind_write;
+    int previous_y = -1;
+    for(int x = wrapped ? 1 : 0; x <= cursor + 1; x++) {
+        uint8_t level = model->rssi_current;
+        if(x <= cursor) {
+            level = model->rssi_history[wrapped ? (model->ind_write + x) %
+                                                      SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE :
+                                                  x];
         }
-    } else {
-        int i = 0;
-        base = SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE - model->ind_write;
-        for(i = SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE; i > 0; i--) {
-            ind = i - base;
-            if(ind < 0) ind += SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE;
-            canvas_draw_line(canvas, i, 47, i, 47 - model->rssi_history[ind]);
-        }
+        const int y = MAX(baseline - level, 13);
+        subghz_receiver_activity_draw_fill(canvas, x, y, baseline);
+        subghz_receiver_activity_draw_stroke(canvas, x, y, baseline, previous_y);
+        previous_y = y;
+    }
 
-        canvas_draw_line(
-            canvas,
-            SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE - 1,
-            47,
-            SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE - 1,
-            47 - model->rssi_current);
-        canvas_draw_line(
-            canvas,
-            SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE + 1,
-            47,
-            SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE + 1,
-            47 - model->rssi_current);
-
+    if(wrapped || model->ind_write > 3) {
+        const uint8_t width = 2;
         for(uint8_t i = 13; i < 47; i += width * 2) {
-            canvas_draw_line(
-                canvas,
-                SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE,
-                i,
-                SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE,
-                i + width);
+            canvas_draw_line(canvas, cursor, i, cursor, i + width);
         }
-        canvas_draw_line(
-            canvas,
-            SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE - 2,
-            12,
-            SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE + 2,
-            12);
-        canvas_draw_line(
-            canvas,
-            SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE - 1,
-            13,
-            SUBGHZ_READ_RAW_RSSI_HISTORY_SIZE + 1,
-            13);
+        canvas_draw_line(canvas, cursor - 2, 12, cursor + 2, 12);
+        canvas_draw_line(canvas, cursor - 1, 13, cursor + 1, 13);
     }
 }
 

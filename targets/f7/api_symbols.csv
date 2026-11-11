@@ -1,5 +1,5 @@
 entry,status,name,type,params
-Version,+,90.7,,
+Version,+,90.10,,
 Header,+,applications/drivers/subghz/cc1101_ext/cc1101_ext_interconnect.h,,
 Header,+,applications/drivers/subghz/si4463_ext/si4463_ext_interconnect.h,,
 Header,+,applications/services/applications.h,,
@@ -2973,6 +2973,7 @@ Function,-,strerror,char*,int
 Function,-,strerror_l,char*,"int, locale_t"
 Function,-,strerror_r,char*,"int, char*, size_t"
 Function,+,string_stream_alloc,Stream*,
+Function,+,string_stream_shrink_to_fit,void,Stream*
 Function,+,strint_to_int16,StrintParseError,"const char*, char**, int16_t*, uint8_t"
 Function,+,strint_to_int32,StrintParseError,"const char*, char**, int32_t*, uint8_t"
 Function,+,strint_to_int64,StrintParseError,"const char*, char**, int64_t*, uint8_t"
@@ -3192,8 +3193,11 @@ Function,+,subghz_raw_file_reader_is_finished,_Bool,SubGhzRawFileReader*
 Function,+,subghz_raw_file_reader_open,_Bool,"SubGhzRawFileReader*, const char*"
 Function,+,subghz_receiver_alloc_init,SubGhzReceiver*,SubGhzEnvironment*
 Function,+,subghz_receiver_alloc_init_ex,SubGhzReceiver*,"SubGhzEnvironment*, SubGhzProtocolFlag"
+Function,+,subghz_receiver_alloc_init_session,SubGhzReceiver*,SubGhzEnvironment*
 Function,+,subghz_receiver_decode,void,"SubGhzReceiver*, _Bool, uint32_t"
+Function,+,subghz_receiver_decode_rssi,void,"SubGhzReceiver*, float"
 Function,+,subghz_receiver_free,void,SubGhzReceiver*
+Function,+,subghz_receiver_prepare_session,void,"SubGhzReceiver*, SubGhzProtocolFlag"
 Function,+,subghz_receiver_reset,void,SubGhzReceiver*
 Function,+,subghz_receiver_search_decoder_base_by_name,SubGhzProtocolDecoderBase*,"SubGhzReceiver*, const char*"
 Function,+,subghz_receiver_set_band,void,"SubGhzReceiver*, SubGhzProtocolFlag"
@@ -3284,6 +3288,7 @@ Function,+,subghz_worker_set_filter,void,"SubGhzWorker*, uint16_t"
 Function,+,subghz_worker_set_overrun_callback,void,"SubGhzWorker*, SubGhzWorkerOverrunCallback"
 Function,+,subghz_worker_set_pair_callback,void,"SubGhzWorker*, SubGhzWorkerPairCallback"
 Function,+,subghz_worker_set_priority,void,"SubGhzWorker*, FuriThreadPriority"
+Function,+,subghz_worker_set_tick_callback,void,"SubGhzWorker*, SubGhzWorkerOverrunCallback"
 Function,+,subghz_worker_start,void,SubGhzWorker*
 Function,+,subghz_worker_stop,void,SubGhzWorker*
 Function,+,submenu_add_item,void,"Submenu*, const char*, uint32_t, SubmenuItemCallback, void*"
@@ -4883,6 +4888,7 @@ Variable,+,subghz_device_cc1101_preset_2fsk_dev12khz_async_regs,const uint8_t[],
 Variable,+,subghz_device_cc1101_preset_2fsk_dev14khz_38kbaud_async_regs,const uint8_t[],
 Variable,+,subghz_device_cc1101_preset_2fsk_dev2_38khz_async_regs,const uint8_t[],
 Variable,+,subghz_device_cc1101_preset_2fsk_dev47_6khz_async_regs,const uint8_t[],
+Variable,-,subghz_device_cc1101_preset_fm15k_async_regs,const uint8_t[],
 Variable,+,subghz_device_cc1101_preset_gfsk_9_99kb_async_regs,const uint8_t[],
 Variable,+,subghz_device_cc1101_preset_mercedes_async_regs,const uint8_t[],
 Variable,+,subghz_device_cc1101_preset_mercedes_rx_async_regs,const uint8_t[],

@@ -328,7 +328,10 @@ SubGhzProtocolStatus
     SubGhzProtocolStatus res = SubGhzProtocolStatusError;
     do {
         if(SubGhzProtocolStatusOk !=
-           subghz_block_generic_deserialize(&instance->generic, flipper_format)) {
+           subghz_block_generic_deserialize_check_count_bit(
+               &instance->generic,
+               flipper_format,
+               subghz_protocol_somfy_telis_const.min_count_bit_for_found)) {
             FURI_LOG_E(TAG, "Deserialize error");
             break;
         }

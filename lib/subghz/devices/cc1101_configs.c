@@ -42,11 +42,11 @@ const uint8_t subghz_device_cc1101_preset_ook_270khz_async_regs[] = {
 
     /* Automatic Gain Control */
     CC1101_AGCCTRL0,
-    0x40, // 01 - Low hysteresis, small asymmetric dead zone, medium gain; 00 - 8 samples agc; 00 - Normal AGC, 00 - 4dB boundary
+    0x40, 
     CC1101_AGCCTRL1,
     0x00, // 0; 0 - LNA 2 gain is decreased to minimum before decreasing LNA gain; 00 - Relative carrier sense threshold disabled; 0000 - RSSI to MAIN_TARGET
     CC1101_AGCCTRL2,
-    0x03, // 00 - DVGA all; 000 - MAX LNA+LNA2; 011 - MAIN_TARGET 24 dB
+    0x03,
 
     /* Wake on radio and timeouts control */
     CC1101_WORCTRL,
@@ -57,6 +57,12 @@ const uint8_t subghz_device_cc1101_preset_ook_270khz_async_regs[] = {
     0x11, // Adjusts current TX LO buffer + high is PATABLE[1]
     CC1101_FREND1,
     0xB6, //
+
+    // DN022: narrow-band test settings for RX bandwidth <= 325 kHz.
+    CC1101_TEST2,
+    0x81,
+    CC1101_TEST1,
+    0x35,
 
     /* End load reg */
     0,
@@ -177,7 +183,7 @@ const uint8_t subghz_device_cc1101_preset_ook_101khz_16kbaud_async_regs[] = {
     CC1101_FOCCFG,
     0x18,
     CC1101_AGCCTRL2,
-    0x1F,
+    0x07,
     CC1101_AGCCTRL1,
     0x00,
     CC1101_AGCCTRL0,
@@ -187,7 +193,13 @@ const uint8_t subghz_device_cc1101_preset_ook_101khz_16kbaud_async_regs[] = {
     CC1101_FREND0,
     0x11,
     CC1101_FREND1,
-    0xB6,
+    0x56,
+    // Explicit analog settings for this bandwidth (TI DN022 / SWRS061I).
+    CC1101_TEST2,
+    0x81,
+    CC1101_TEST1,
+    0x35,
+
     0,
     0,
     0x00,
@@ -198,6 +210,16 @@ const uint8_t subghz_device_cc1101_preset_ook_101khz_16kbaud_async_regs[] = {
     0x00,
     0x00,
     0x00,
+};
+
+const uint8_t subghz_device_cc1101_preset_fm15k_async_regs[] = {
+    0x02, 0x0D, 0x03, 0x47, 0x08, 0x32, 0x0B, 0x06,
+    0x15, 0x32, 0x14, 0x00, 0x13, 0x00, 0x12, 0x00,
+    0x11, 0x32, 0x10, 0xA7, 0x18, 0x18, 0x19, 0x1D,
+    0x1D, 0x92, 0x1C, 0x00, 0x1B, 0x04, 0x20, 0xFB,
+    0x22, 0x17, 0x21, 0xB6, 0x2C, 0x81, 0x2D, 0x35,
+    0x00, 0x00, 0x00, 0x12, 0x0E, 0x34, 0x60, 0xC5,
+    0xC1, 0xC0,
 };
 
 const uint8_t subghz_device_cc1101_preset_2fsk_dev2_38khz_async_regs[] = {
@@ -226,7 +248,7 @@ const uint8_t subghz_device_cc1101_preset_2fsk_dev2_38khz_async_regs[] = {
     CC1101_MDMCFG3,
     0x83, // Data rate is 4.79794 kBaud
     CC1101_MDMCFG4,
-    0x67, //Rx BW filter is 270.833333 kHz
+    0x67,
     CC1101_DEVIATN,
     0x04, //Deviation 2.380371 kHz
 
@@ -236,7 +258,7 @@ const uint8_t subghz_device_cc1101_preset_2fsk_dev2_38khz_async_regs[] = {
 
     /* Frequency Offset Compensation Configuration */
     CC1101_FOCCFG,
-    0x16, // no frequency offset compensation, POST_K same as PRE_K, PRE_K is 4K, GATE is off
+    0x16,
 
     /* Automatic Gain Control */
     CC1101_AGCCTRL0,
@@ -257,6 +279,14 @@ const uint8_t subghz_device_cc1101_preset_2fsk_dev2_38khz_async_regs[] = {
     0x56,
 
     /* End load reg */
+    // Explicit analog settings for this bandwidth (TI DN022 / SWRS061I).
+    CC1101_TEST2,
+    0x81,
+    CC1101_TEST1,
+    0x35,
+    CC1101_FIFOTHR,
+    0x47,
+
     0,
     0,
 
@@ -307,7 +337,7 @@ const uint8_t subghz_device_cc1101_preset_2fsk_dev12khz_async_regs[] = {
 
     /* Frequency Offset Compensation Configuration */
     CC1101_FOCCFG,
-    0x16, // no frequency offset compensation, POST_K same as PRE_K, PRE_K is 4K, GATE is off
+    0x16,
 
     /* Automatic Gain Control */
     CC1101_AGCCTRL0,
@@ -325,9 +355,17 @@ const uint8_t subghz_device_cc1101_preset_2fsk_dev12khz_async_regs[] = {
     CC1101_FREND0,
     0x10, // Adjusts current TX LO buffer
     CC1101_FREND1,
-    0x56,
+    0xB6,
 
     /* End load reg */
+    // Explicit analog settings for this bandwidth (TI DN022 / SWRS061I).
+    CC1101_TEST2,
+    0x81,
+    CC1101_TEST1,
+    0x35,
+    CC1101_FIFOTHR,
+    0x47,
+
     0,
     0,
 
@@ -383,6 +421,12 @@ const uint8_t subghz_device_cc1101_preset_mercedes_async_regs[] = {
     0x10,
     CC1101_FREND1,
     0x56,
+    // Explicit analog settings for this bandwidth (TI DN022 / SWRS061I).
+    CC1101_TEST2,
+    0x81,
+    CC1101_TEST1,
+    0x35,
+
     0,
     0,
     0xC0,
@@ -395,28 +439,62 @@ const uint8_t subghz_device_cc1101_preset_mercedes_async_regs[] = {
     0x00,
 };
 const uint8_t subghz_device_cc1101_preset_mercedes_rx_async_regs[] = {
-    CC1101_IOCFG0, 0x0D,
-    CC1101_FIFOTHR, 0x47,
-    CC1101_PKTCTRL1, 0x04,
-    CC1101_PKTCTRL0, 0x32,
-    CC1101_FSCTRL1, 0x06,
-    CC1101_FSCTRL0, 0x00,
-    CC1101_MDMCFG4, 0xC9,
-    CC1101_MDMCFG3, 0x93,
-    CC1101_MDMCFG2, 0x00,
-    CC1101_MDMCFG1, 0x02,
-    CC1101_MDMCFG0, 0x00,
-    CC1101_DEVIATN, 0x25,
-    CC1101_MCSM0, 0x18,
-    CC1101_FOCCFG, 0x17,
-    CC1101_AGCCTRL2, 0x07,
-    CC1101_AGCCTRL1, 0x00,
-    CC1101_AGCCTRL0, 0x91,
-    CC1101_WORCTRL, 0xFB,
-    CC1101_FREND0, 0x10,
-    CC1101_FREND1, 0x56,
-    0x00, 0x00,
-    0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    CC1101_IOCFG0,
+    0x0D,
+    CC1101_FIFOTHR,
+    0x47,
+    CC1101_PKTCTRL1,
+    0x04,
+    CC1101_PKTCTRL0,
+    0x32,
+    CC1101_FSCTRL1,
+    0x06,
+    CC1101_FSCTRL0,
+    0x00,
+    CC1101_MDMCFG4,
+    0xC9,
+    CC1101_MDMCFG3,
+    0x93,
+    CC1101_MDMCFG2,
+    0x00,
+    CC1101_MDMCFG1,
+    0x02,
+    CC1101_MDMCFG0,
+    0x00,
+    CC1101_DEVIATN,
+    0x25,
+    CC1101_MCSM0,
+    0x18,
+    CC1101_FOCCFG,
+    0x17,
+    CC1101_AGCCTRL2,
+    0x07,
+    CC1101_AGCCTRL1,
+    0x00,
+    CC1101_AGCCTRL0,
+    0x91,
+    CC1101_WORCTRL,
+    0xFB,
+    CC1101_FREND0,
+    0x10,
+    CC1101_FREND1,
+    0x56,
+    // Explicit analog settings for this bandwidth (TI DN022 / SWRS061I).
+    CC1101_TEST2,
+    0x81,
+    CC1101_TEST1,
+    0x35,
+
+    0x00,
+    0x00,
+    0xC0,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
 };
 
 const uint8_t subghz_device_cc1101_preset_2fsk_dev14khz_38kbaud_async_regs[] = {
@@ -455,7 +533,15 @@ const uint8_t subghz_device_cc1101_preset_2fsk_dev14khz_38kbaud_async_regs[] = {
     CC1101_FREND0,
     0x10,
     CC1101_FREND1,
-    0x56,
+    0xB6,
+    // Explicit analog settings for this bandwidth (TI DN022 / SWRS061I).
+    CC1101_TEST2,
+    0x81,
+    CC1101_TEST1,
+    0x35,
+    CC1101_FIFOTHR,
+    0x47,
+
     0,
     0,
     0xC0,
@@ -492,9 +578,9 @@ const uint8_t subghz_device_cc1101_preset_2fsk_dev47_6khz_async_regs[] = {
     CC1101_MDMCFG2,
     0x04, // Format 2-FSK/FM, No preamble/sync, Disable (current optimized)
     CC1101_MDMCFG3,
-    0x83, // Data rate is 4.79794 kBaud
+    0x83,
     CC1101_MDMCFG4,
-    0x67, //Rx BW filter is 270.833333 kHz
+    0x67,
     CC1101_DEVIATN,
     0x47, //Deviation 47.60742 kHz
 
@@ -504,7 +590,7 @@ const uint8_t subghz_device_cc1101_preset_2fsk_dev47_6khz_async_regs[] = {
 
     /* Frequency Offset Compensation Configuration */
     CC1101_FOCCFG,
-    0x16, // no frequency offset compensation, POST_K same as PRE_K, PRE_K is 4K, GATE is off
+    0x16,
 
     /* Automatic Gain Control */
     CC1101_AGCCTRL0,
@@ -522,9 +608,17 @@ const uint8_t subghz_device_cc1101_preset_2fsk_dev47_6khz_async_regs[] = {
     CC1101_FREND0,
     0x10, // Adjusts current TX LO buffer
     CC1101_FREND1,
-    0x56,
+    0xB6,
 
     /* End load reg */
+    // Explicit analog settings for this bandwidth (TI DN022 / SWRS061I).
+    CC1101_TEST2,
+    0x81,
+    CC1101_TEST1,
+    0x35,
+    CC1101_FIFOTHR,
+    0x47,
+
     0,
     0,
 

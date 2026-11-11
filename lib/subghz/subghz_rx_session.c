@@ -194,23 +194,31 @@ static void subghz_rx_session_swap_preset_locked(SubGhzRxSession* instance) {
     subghz_rx_session_use_preset_locked(instance, instance->preset_index);
 }
 
+static bool subghz_rx_session_preset_is_heavy(const uint8_t* preset_data) {
+    if(!preset_data) return false;
+    for(size_t i = 0; preset_data[i]; i += 2) {
+        if(preset_data[i] == CC1101_MDMCFG2) {
+            return ((preset_data[i + 1] >> 4) & 0x07) != 3; // non-OOK => FSK => heavy
+        }
+    }
+    return false;
+}
+
 static SubGhzProtocolFlag subghz_rx_session_modulation_mask(const uint8_t* preset_data) {
-    if(preset_data) {
-        for(size_t i = 0; preset_data[i]; i += 2) {
-            if(preset_data[i] == CC1101_MDMCFG2) {
-                switch((preset_data[i + 1] >> 4) & 0x07) {
-                case 3: // ASK/OOK
-                    return SubGhzProtocolFlag_AM;
-                case 0: // 2-FSK
-                case 1: // GFSK
-                case 4: // 4-FSK
-                case 7: // MSK
-                    return SubGhzProtocolFlag_FM;
-                default:
-                    break;
-                }
+    for(size_t i = 0; preset_data[i]; i += 2) {
+        if(preset_data[i] == CC1101_MDMCFG2) {
+            switch((preset_data[i + 1] >> 4) & 0x07) {
+            case 3: // ASK/OOK
+                return SubGhzProtocolFlag_AM;
+            case 0: // 2-FSK
+            case 1: // GFSK
+            case 4: // 4-FSK
+            case 7: // MSK
+                return SubGhzProtocolFlag_FM;
+            default:
                 break;
             }
+            break;
         }
     }
     // Unknown modulation must not exclude a decoder.
@@ -224,19 +232,19 @@ static SubGhzProtocolFlag subghz_rx_session_band_flag(uint32_t frequency) {
     return SubGhzProtocolFlag_315 | SubGhzProtocolFlag_433 | SubGhzProtocolFlag_868;
 }
 
-static bool subghz_rx_session_preset_is_heavy(const uint8_t* preset_data) {
-    if(!preset_data) return false;
+static uint32_t subghz_rx_session_data_rate(const uint8_t* preset_data) {
+    uint8_t mdmcfg4 = 0, mdmcfg3 = 0;
     for(size_t i = 0; preset_data[i]; i += 2) {
-        if(preset_data[i] == CC1101_MDMCFG2) {
-            return ((preset_data[i + 1] >> 4) & 0x07) != 3; // non-OOK => FSK => heavy
-        }
+        if(preset_data[i] == CC1101_MDMCFG4) mdmcfg4 = preset_data[i + 1];
+        if(preset_data[i] == CC1101_MDMCFG3) mdmcfg3 = preset_data[i + 1];
     }
-    return false;
+    return (uint32_t)(((uint64_t)(256u + mdmcfg3) << (mdmcfg4 & 0x0F)) * 26000000ull >> 28);
 }
 
 static SubGhzProtocolFlag
     subghz_rx_session_gate_mask(uint32_t frequency, const uint8_t* preset_data) {
-    if(!subghz_rx_session_preset_is_heavy(preset_data))
+    if(!subghz_rx_session_preset_is_heavy(preset_data) ||
+       subghz_rx_session_data_rate(preset_data) < 15000u)
         return SubGhzProtocolFlag_AM | SubGhzProtocolFlag_FM | SubGhzProtocolFlag_315 |
                SubGhzProtocolFlag_433 | SubGhzProtocolFlag_868;
     return subghz_rx_session_modulation_mask(preset_data) | subghz_rx_session_band_flag(frequency);

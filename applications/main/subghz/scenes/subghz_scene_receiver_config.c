@@ -103,6 +103,17 @@ static void
     subghz->last_settings->ignore_filter = subghz->ignore_filter;
 }
 
+static void subghz_scene_receiver_config_set_bin_raw(VariableItem* item) {
+    SubGhz* subghz = variable_item_get_context(item);
+    const uint8_t index = variable_item_get_current_value_index(item);
+    if(index) SET_BIT(subghz->filter, SubGhzProtocolFlag_BinRAW);
+    else
+        CLEAR_BIT(subghz->filter, SubGhzProtocolFlag_BinRAW);
+    subghz->last_settings->filter = subghz->filter;
+    subghz_txrx_receiver_set_filter(subghz->txrx, subghz->filter);
+    variable_item_set_current_value_text(item, combobox_text[index]);
+}
+
 uint8_t subghz_scene_receiver_config_next_frequency(const uint32_t value, void* context) {
     furi_assert(context);
     SubGhz* subghz = context;
@@ -684,6 +695,16 @@ static void subghz_scene_receiver_config_populate(SubGhz* subghz) {
 
     if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneReadRAW) !=
        SubGhzCustomEventManagerSet) {
+        item = variable_item_list_add(
+            subghz->variable_item_list,
+            "BinRAW",
+            COMBO_BOX_COUNT,
+            subghz_scene_receiver_config_set_bin_raw,
+            subghz);
+        value_index = (subghz->filter & SubGhzProtocolFlag_BinRAW) != 0;
+        variable_item_set_current_value_index(item, value_index);
+        variable_item_set_current_value_text(item, combobox_text[value_index]);
+
         item = variable_item_list_add(
             subghz->variable_item_list,
             "Ignore ReversRB2",

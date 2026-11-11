@@ -3,6 +3,7 @@
 #include <gui/view.h>
 #include "../helpers/subghz_types.h"
 #include "../helpers/subghz_custom_event.h"
+#include "../helpers/subghz_txrx.h"
 
 typedef struct SubGhzViewReceiver SubGhzViewReceiver;
 
@@ -15,6 +16,8 @@ void subghz_view_receiver_set_mode(
 void subghz_receiver_rssi(SubGhzViewReceiver* instance, float rssi, float floor);
 
 void subghz_view_receiver_rssi_ext(SubGhzViewReceiver* instance, float rssi);
+
+void subghz_view_receiver_update_activity(SubGhzViewReceiver* instance, SubGhzTxRx* txrx);
 
 void subghz_view_receiver_set_lock(SubGhzViewReceiver* subghz_receiver, bool keyboard);
 

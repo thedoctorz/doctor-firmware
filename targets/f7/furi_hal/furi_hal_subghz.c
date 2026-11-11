@@ -641,34 +641,98 @@ volatile uint32_t furi_hal_subghz_capture_delta_duration = 0;
 volatile FuriHalSubGhzCaptureCallback furi_hal_subghz_capture_callback = NULL;
 volatile void* furi_hal_subghz_capture_callback_context = NULL;
 
+/* GD0 passes through one input filter (TI2, IC2F) and drives both captures, so
+ * the filtered edges TIM2 sees strictly alternate. A rising edge latches the
+ * rising-to-rising period into CCR2 and resets the counter; a falling edge
+ * latches the high time since that reset into CCR1. Knowing which edge was
+ * processed last therefore fixes the order of any pending captures. */
+typedef enum {
+    FuriHalSubGhzCaptureEdgeNone, /* Unsynchronised: wait for a lone rising edge */
+    FuriHalSubGhzCaptureEdgeRising,
+    FuriHalSubGhzCaptureEdgeFalling,
+} FuriHalSubGhzCaptureEdge;
+
+static volatile FuriHalSubGhzCaptureEdge furi_hal_subghz_capture_edge =
+    FuriHalSubGhzCaptureEdgeNone;
+
+static void furi_hal_subghz_capture_emit(bool level, uint32_t duration) {
+    /* A zero-width interval is demodulator chatter, not a capture-loss marker. */
+    if(!duration || !furi_hal_subghz_capture_callback) return;
+    if(furi_hal_subghz.async_mirror_pin)
+        furi_hal_gpio_write(furi_hal_subghz.async_mirror_pin, !level);
+    furi_hal_subghz_capture_callback(
+        level, duration, (void*)furi_hal_subghz_capture_callback_context);
+}
+
+/* Edges were lost: report a discontinuity and wait for a known boundary.
+ * A capture that arrived after the flags were sampled may predate the lost
+ * edge, so both are discarded before the overcapture flags are cleared. From
+ * here on, a lone pending capture is the only edge since the loss. */
+static void furi_hal_subghz_capture_resync(void) {
+    (void)LL_TIM_IC_GetCaptureCH1(TIM2);
+    (void)LL_TIM_IC_GetCaptureCH2(TIM2);
+    LL_TIM_ClearFlag_CC1OVR(TIM2);
+    LL_TIM_ClearFlag_CC2OVR(TIM2);
+    furi_hal_subghz_capture_edge = FuriHalSubGhzCaptureEdgeNone;
+    if(furi_hal_subghz_capture_callback)
+        furi_hal_subghz_capture_callback(
+            false, 0, (void*)furi_hal_subghz_capture_callback_context);
+}
+
+static void furi_hal_subghz_capture_high(uint32_t high) {
+    furi_hal_subghz_capture_delta_duration = high;
+    furi_hal_subghz_capture_edge = FuriHalSubGhzCaptureEdgeFalling;
+    furi_hal_subghz_capture_emit(true, high);
+}
+
+static bool furi_hal_subghz_capture_low(uint32_t period) {
+    if(period <= furi_hal_subghz_capture_delta_duration) return false;
+    furi_hal_subghz_capture_edge = FuriHalSubGhzCaptureEdgeRising;
+    furi_hal_subghz_capture_emit(false, period - furi_hal_subghz_capture_delta_duration);
+    return true;
+}
+
 static void furi_hal_subghz_capture_ISR(void* context) {
     UNUSED(context);
-    // Channel 1
-    if(LL_TIM_IsActiveFlag_CC1(TIM2)) {
-        LL_TIM_ClearFlag_CC1(TIM2);
-        furi_hal_subghz_capture_delta_duration = LL_TIM_IC_GetCaptureCH1(TIM2);
-        if(furi_hal_subghz_capture_callback) {
-            if(furi_hal_subghz.async_mirror_pin != NULL)
-                furi_hal_gpio_write(furi_hal_subghz.async_mirror_pin, false);
-
-            furi_hal_subghz_capture_callback(
-                true,
-                furi_hal_subghz_capture_delta_duration,
-                (void*)furi_hal_subghz_capture_callback_context);
-        }
+    const bool falling = LL_TIM_IsActiveFlag_CC1(TIM2);
+    const bool rising = LL_TIM_IsActiveFlag_CC2(TIM2);
+    /* Reading CCRx acknowledges CCxIF. Never clear CCxIF through SR: an edge
+     * captured after the read would be erased without an overcapture flag.
+     * Both values are read before any callback runs; newer edges stay pending
+     * and re-enter the ISR. */
+    const uint32_t high = falling ? LL_TIM_IC_GetCaptureCH1(TIM2) : 0;
+    const uint32_t period = rising ? LL_TIM_IC_GetCaptureCH2(TIM2) : 0;
+    /* Checked after the reads, so a capture overwritten before it was read is caught. */
+    if(LL_TIM_IsActiveFlag_CC1OVR(TIM2) || LL_TIM_IsActiveFlag_CC2OVR(TIM2)) {
+        furi_hal_subghz_capture_resync();
+        return;
     }
-    // Channel 2
-    if(LL_TIM_IsActiveFlag_CC2(TIM2)) {
-        LL_TIM_ClearFlag_CC2(TIM2);
-        if(furi_hal_subghz_capture_callback) {
-            if(furi_hal_subghz.async_mirror_pin != NULL)
-                furi_hal_gpio_write(furi_hal_subghz.async_mirror_pin, true);
+    if(!falling && !rising) return;
 
-            furi_hal_subghz_capture_callback(
-                false,
-                LL_TIM_IC_GetCaptureCH2(TIM2) - furi_hal_subghz_capture_delta_duration,
-                (void*)furi_hal_subghz_capture_callback_context);
+    switch(furi_hal_subghz_capture_edge) {
+    case FuriHalSubGhzCaptureEdgeNone:
+        /* The order of two pending captures is unknown here, and so is the
+         * start of a falling capture's period. A lone rising capture is the
+         * only edge since sync was lost, so it is a known boundary. */
+        if(rising && !falling) furi_hal_subghz_capture_edge = FuriHalSubGhzCaptureEdgeRising;
+        break;
+    case FuriHalSubGhzCaptureEdgeRising:
+        /* Falling comes next; a pending rising edge followed it. */
+        if(!falling) {
+            furi_hal_subghz_capture_resync();
+        } else {
+            furi_hal_subghz_capture_high(high);
+            if(rising && !furi_hal_subghz_capture_low(period)) furi_hal_subghz_capture_resync();
         }
+        break;
+    case FuriHalSubGhzCaptureEdgeFalling:
+        /* Rising comes next; a pending falling edge followed it. */
+        if(!rising || !furi_hal_subghz_capture_low(period)) {
+            furi_hal_subghz_capture_resync();
+        } else if(falling) {
+            furi_hal_subghz_capture_high(high);
+        }
+        break;
     }
 }
 
@@ -709,6 +773,8 @@ void furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void*
     LL_TIM_IC_SetActiveInput(TIM2, LL_TIM_CHANNEL_CH1, LL_TIM_ACTIVEINPUT_INDIRECTTI);
     LL_TIM_IC_SetPrescaler(TIM2, LL_TIM_CHANNEL_CH1, LL_TIM_ICPSC_DIV1);
     LL_TIM_IC_SetPolarity(TIM2, LL_TIM_CHANNEL_CH1, LL_TIM_IC_POLARITY_FALLING);
+    // No CH1 filter: indirect mode captures TI2FP1, which is TI2 after the CH2
+    // filter below, so both edges share the same 16us qualification delay.
 
     // Timer: channel 2 direct
     LL_TIM_IC_SetActiveInput(TIM2, LL_TIM_CHANNEL_CH2, LL_TIM_ACTIVEINPUT_DIRECTTI);
@@ -718,6 +784,10 @@ void furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void*
         TIM2,
         LL_TIM_CHANNEL_CH2,
         LL_TIM_IC_FILTER_FDIV32_N8); // Capture filter: 1/(64000000/64/4/32*8) = 16us
+
+    // Capture state must be clean before the first edge can interrupt
+    furi_hal_subghz_capture_delta_duration = 0;
+    furi_hal_subghz_capture_edge = FuriHalSubGhzCaptureEdgeNone;
 
     // ISR setup
     furi_hal_interrupt_set_isr(FuriHalInterruptIdTIM2, furi_hal_subghz_capture_ISR, NULL);
@@ -737,9 +807,6 @@ void furi_hal_subghz_start_async_rx(FuriHalSubGhzCaptureCallback callback, void*
 
     // Switch to RX
     furi_hal_subghz_rx();
-
-    // Clear the variable after the end of the session
-    furi_hal_subghz_capture_delta_duration = 0;
 }
 
 void furi_hal_subghz_stop_async_rx(void) {
@@ -902,6 +969,11 @@ void furi_hal_subghz_hop_resume(void) {
     LL_TIM_SetCounter(TIM2, 0);
     LL_TIM_ClearFlag_CC1(TIM2);
     LL_TIM_ClearFlag_CC2(TIM2);
+    LL_TIM_ClearFlag_CC1OVR(TIM2);
+    LL_TIM_ClearFlag_CC2OVR(TIM2);
+    // Channels are off and no capture is pending, so the ISR cannot race this.
+    // The counter reset ends the current period; wait for the next rising edge.
+    furi_hal_subghz_capture_edge = FuriHalSubGhzCaptureEdgeNone;
     LL_TIM_CC_EnableChannel(TIM2, LL_TIM_CHANNEL_CH1);
     LL_TIM_CC_EnableChannel(TIM2, LL_TIM_CHANNEL_CH2);
 }

@@ -65,6 +65,8 @@ const SubGhzProtocol* const subghz_protocol_registry_items[] = {
     &subghz_protocol_subaru,
     &subghz_protocol_chrysler_v0,
     &subghz_protocol_fiat_v0,
+    &subghz_protocol_bin_raw,
+    &subghz_protocol_hitag2,
     &subghz_protocol_fiat_v1,
     &subghz_protocol_ford_v0,
     &subghz_protocol_ford_v1,

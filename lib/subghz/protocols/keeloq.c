@@ -467,8 +467,7 @@ static bool subghz_protocol_keeloq_gen_data(
                     manufacture_code,
                     *subghz_keystore_get_data(instance->keystore),
                     SubGhzKeyArray_t) {
-                    res = strcmp(
-                        furi_string_get_cstr(manufacture_code->name), instance->manufacture_name);
+                    res = strcmp(manufacture_code->name, instance->manufacture_name);
                     if(res == 0) {
                         switch(manufacture_code->type) {
                         case KEELOQ_LEARNING_SIMPLE:
@@ -1174,7 +1173,7 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller_selector(
 
     for
         M_EACH(manufacture_code, *manufacture_codes, SubGhzKeyArray_t) {
-            const char* row_name = furi_string_get_cstr(manufacture_code->name);
+            const char* row_name = manufacture_code->name;
             if(mf_not_set || (strcmp(row_name, mfname) == 0)) {
                 switch(manufacture_code->type) {
                 case KEELOQ_LEARNING_SIMPLE:
@@ -1201,7 +1200,7 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller_selector(
                     man =
                         subghz_protocol_keeloq_common_normal_learning(fix, manufacture_code->key);
                     decrypt = subghz_protocol_keeloq_common_decrypt(hop, man);
-                    if((strcmp(furi_string_get_cstr(manufacture_code->name), "Centurion") == 0)) {
+                    if((strcmp(manufacture_code->name, "Centurion") == 0)) {
                         if(subghz_protocol_keeloq_check_decrypt_centurion(instance, decrypt, btn)) {
                             KEELOQ_SELECTOR_MATCH(0, decrypt);
                         }
@@ -1218,7 +1217,7 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller_selector(
                     break;
                 case KEELOQ_LEARNING_SECURE:
                     bool reset_seed_back = false;
-                    if((strcmp(furi_string_get_cstr(manufacture_code->name), "BFT") == 0)) {
+                    if((strcmp(manufacture_code->name, "BFT") == 0)) {
                         // Try current seed from file if present
                         man = subghz_protocol_keeloq_common_secure_learning(
                             fix, instance->seed, manufacture_code->key);
@@ -1327,7 +1326,7 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller_selector(
                         decrypt = subghz_protocol_keeloq_common_decrypt(hop, man);
                         if(subghz_protocol_keeloq_check_decrypt(
                                instance, decrypt, btn, end_serial)) {
-                            *manufacture_name = furi_string_get_cstr(manufacture_code->name);
+                            *manufacture_name = manufacture_code->name;
                             keystore->mfname = *manufacture_name;
                             instance->seed = jcm_seed;
                             return decrypt;
@@ -1339,7 +1338,7 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller_selector(
                         fix, manufacture_code->key);
                     decrypt = subghz_protocol_keeloq_common_decrypt(hop, man);
                     if(subghz_protocol_keeloq_check_decrypt(instance, decrypt, btn, end_serial)) {
-                        *manufacture_name = furi_string_get_cstr(manufacture_code->name);
+                        *manufacture_name = manufacture_code->name;
                         keystore->mfname = *manufacture_name;
                         return decrypt;
                     }
@@ -1367,7 +1366,7 @@ static uint32_t subghz_protocol_keeloq_check_remote_controller_selector(
                     man = subghz_protocol_keeloq_common_learning_telcoma_table(fix, telcoma_table);
                     decrypt = subghz_protocol_keeloq_common_decrypt(hop, man);
                     if(subghz_protocol_keeloq_check_decrypt(instance, decrypt, btn, end_serial)) {
-                        *manufacture_name = furi_string_get_cstr(manufacture_code->name);
+                        *manufacture_name = manufacture_code->name;
                         keystore->mfname = *manufacture_name;
                         return decrypt;
                     }

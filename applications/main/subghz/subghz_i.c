@@ -27,6 +27,9 @@ bool subghz_tx_start(SubGhz* subghz, FlipperFormat* flipper_format) {
         dialog_message_show_storage_error(
             subghz->dialogs, "Error in protocol\nparameters\ndescription");
         break;
+    case SubGhzTxRxStartTxStateErrorNoMemory:
+        dialog_message_show_storage_error(subghz->dialogs, "Not enough memory\nfor transmission");
+        break;
     case SubGhzTxRxStartTxStateErrorOnlyRx:
         subghz_dialog_message_freq_error(subghz, true);
         break;

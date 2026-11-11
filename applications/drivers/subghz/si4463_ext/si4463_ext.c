@@ -9,6 +9,7 @@
 #include <furi_hal_cortex.h>
 #include <stm32wbxx_ll_dma.h>
 #include <stm32wbxx_ll_tim.h>
+#include <stm32wbxx_ll_spi.h>
 
 #include <string.h>
 
@@ -24,7 +25,45 @@
 #define SI4463_NPRESC      2ull
 
 #define SI4463_SPI_BUS        (&furi_hal_spi_bus_handle_external_radio)
-#define SI4463_SPI_BUS_LEGACY (&furi_hal_spi_bus_handle_external)
+#define SI4463_SPI_BUS_LEGACY (&si4463_spi_handle_slow)
+
+static void si4463_spi_slow_event_callback(
+    const FuriHalSpiBusHandle* handle,
+    FuriHalSpiBusHandleEvent event) {
+    if(event == FuriHalSpiBusHandleEventInit) {
+        furi_hal_gpio_write(handle->cs, true);
+        furi_hal_gpio_init(handle->cs, GpioModeOutputPushPull, GpioPullUp, GpioSpeedLow);
+    } else if(event == FuriHalSpiBusHandleEventDeinit) {
+        furi_hal_gpio_write(handle->cs, true);
+        furi_hal_gpio_init(handle->cs, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+    } else if(event == FuriHalSpiBusHandleEventActivate) {
+        LL_SPI_Init(handle->bus->spi, (LL_SPI_InitTypeDef*)&furi_hal_spi_preset_1edge_low_2m);
+        LL_SPI_SetRxFIFOThreshold(handle->bus->spi, LL_SPI_RX_FIFO_TH_QUARTER);
+        LL_SPI_Enable(handle->bus->spi);
+        furi_hal_gpio_init_ex(
+            handle->miso, GpioModeAltFunctionPushPull, GpioPullDown, GpioSpeedLow, GpioAltFn5SPI1);
+        furi_hal_gpio_init_ex(
+            handle->mosi, GpioModeAltFunctionPushPull, GpioPullDown, GpioSpeedLow, GpioAltFn5SPI1);
+        furi_hal_gpio_init_ex(
+            handle->sck, GpioModeAltFunctionPushPull, GpioPullDown, GpioSpeedLow, GpioAltFn5SPI1);
+        furi_hal_gpio_write(handle->cs, false);
+    } else if(event == FuriHalSpiBusHandleEventDeactivate) {
+        furi_hal_gpio_write(handle->cs, true);
+        furi_hal_gpio_init(handle->miso, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+        furi_hal_gpio_init(handle->mosi, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+        furi_hal_gpio_init(handle->sck, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
+        LL_SPI_Disable(handle->bus->spi);
+    }
+}
+
+static const FuriHalSpiBusHandle si4463_spi_handle_slow = {
+    .bus = &furi_hal_spi_bus_r,
+    .callback = si4463_spi_slow_event_callback,
+    .miso = &gpio_ext_pa6,
+    .mosi = &gpio_ext_pa7,
+    .sck = &gpio_ext_pb3,
+    .cs = &gpio_ext_pa4,
+};
 
 #define SI4463_CMD_PART_INFO      0x01
 #define SI4463_CMD_POWER_UP       0x02
@@ -550,7 +589,9 @@ void subghz_device_si4463_ext_reset(void) {
     if(!si4463->identified) return;
 
     furi_hal_spi_acquire(si4463->spi_bus_handle);
-    if(!si4463_sdn_reset_and_configure()) {
+    const bool live = si4463->configuration_valid && !si4463->asleep && !si4463->standby &&
+                      si4463_change_state(SI4463_STATE_READY) && si4463_config_retained();
+    if(!live && !si4463_sdn_reset_and_configure()) {
         FURI_LOG_E(TAG, "Reset failed");
     }
     si4463->state = Si4463StateIdle;

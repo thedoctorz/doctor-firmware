@@ -1,6 +1,8 @@
 #pragma once
 
 #include "subghz_txrx.h"
+#include "../subghz_history.h"
+#include "subghz_txrx_activity.h"
 
 #define SUBGHZ_HOPPER_FREQ_FLOOR_MAX 16
 
@@ -12,15 +14,19 @@ typedef struct {
 typedef struct {
     SubGhzReceiver* receiver;
     FuriMutex* mutex;
+    const SubGhzDevice* device;
 } SubGhzDualChain;
 
 struct SubGhzTxRx {
+    SubGhzTxRxActivity* activity;
     SubGhzWorker* worker;
+    bool bin_raw_enabled;
 
     SubGhzEnvironment* environment;
     SubGhzReceiver* receiver;
     SubGhzTransmitter* transmitter;
     SubGhzProtocolDecoderBase* decoder_result;
+    bool decoder_result_owned;
     FlipperFormat* fff_data;
 
     SubGhzRadioPreset* preset;
@@ -84,6 +90,8 @@ struct SubGhzTxRx {
     SubGhzSpeakerState speaker_state;
     const SubGhzDevice* radio_device;
     SubGhzRadioDeviceType radio_device_type;
+    bool radio_power_acquired;
+    bool radio_power_was_requested;
     //An external module was asked for and answered; radio_device_type is what is
     //actually driving right now, and the two part company when one is unplugged
     bool radio_device_external_wanted;
@@ -117,8 +125,14 @@ struct SubGhzTxRx {
     bool raw_gate_have_floor;
     int raw_gate_floor_db;
     uint8_t raw_gate_low_hits;
+    int16_t raw_gate_rssi_half_db;
     uint32_t raw_gate_last_rssi;
     uint32_t* raw_gate_ring;
     uint16_t raw_gate_ring_n;
     uint16_t raw_gate_ring_i;
+
+    SubGhzProtocolFlag receiver_session_gate;
+    SubGhzHistory* history;
 };
+
+void subghz_txrx_release_decoder_result(SubGhzTxRx* instance);
